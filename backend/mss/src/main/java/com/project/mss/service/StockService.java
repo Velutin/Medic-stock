@@ -77,14 +77,14 @@ public class StockService {
     /** Transfers between (hospital, location) pairs and records the movement. */
     @Transactional
     public StockMovement transfer(MovementType type, Lot lot, int quantity,
-                                   Hospital origem, Location locOrigem,
+                                   Hospital source, Location sourceLocation,
                                    Hospital destination, Location destinationLocation,
                                    Long loanId, Long deliveryId, String notes) {
-        debit(lot, origem, locOrigem, quantity);
+        debit(lot, source, sourceLocation, quantity);
         credit(lot, destination, destinationLocation, quantity);
         StockMovement m = newMovement(type, lot, quantity);
-        m.setSourceHospital(origem);
-        m.setSourceLocation(locOrigem);
+        m.setSourceHospital(source);
+        m.setSourceLocation(sourceLocation);
         m.setDestinationHospital(destination);
         m.setDestinationLocation(destinationLocation);
         m.setLoanId(loanId);
@@ -153,7 +153,7 @@ public class StockService {
     @Transactional
     public void manualEntry(StockEntryDTO dto) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
         Material material = materialService.findByRef(dto.ref());
         Lot lot = materialService.getOrCreateLot(material, dto.lot(), dto.expiryDate());
         recordEntry(lot, dto.quantity(), hospital, dto.location(), "Manual entry");
@@ -162,7 +162,7 @@ public class StockService {
     @Transactional
     public void manualAdjustment(StockAdjustmentDTO dto) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
         Lot lot = materialService.findLot(dto.lotId());
         adjustBalance(lot, hospital, dto.location(), dto.countedQuantity(), dto.reason());
     }
@@ -173,7 +173,7 @@ public class StockService {
      */
     @Transactional(readOnly = true)
     public List<StockRowDTO> hospitalView(Long hospitalId, boolean includeExpired) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         LocalDate today = LocalDate.now();
         Map<Long, int[]> balances = new LinkedHashMap<>();
         Map<Long, Lot> lots = new LinkedHashMap<>();
@@ -208,7 +208,7 @@ public class StockService {
 
     @Transactional(readOnly = true)
     public Page<StockMovementDTO> history(Long hospitalId, LocalDate start, LocalDate end, Pageable pageable) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         LocalDateTime i = (start != null ? start : LocalDate.now().minusDays(30)).atStartOfDay();
         LocalDateTime f = (end != null ? end : LocalDate.now()).plusDays(1).atStartOfDay().minusNanos(1);
         return stockMovementRepository.listByHospital(hospitalId, i, f, pageable).map(StockMovementDTO::of);

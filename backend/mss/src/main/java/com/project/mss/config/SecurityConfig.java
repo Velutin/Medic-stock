@@ -29,7 +29,7 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authorize -> authorize
                     // Public resources / docs
-                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/error").permitAll()
 
                     // Public authentication. User registration is restricted to administrators.
                     .requestMatchers(HttpMethod.POST, "/auth/login", "/auth/logout", "/user/forgot-password", "/user/reset-password").permitAll()
@@ -37,7 +37,7 @@ public class SecurityConfig {
 
                     // Any authenticated user can change their own password and read their profile
                     .requestMatchers(HttpMethod.PATCH, "/user/change-password").authenticated()
-                    .requestMatchers(HttpMethod.GET, "/user/me").authenticated()
+                    .requestMatchers(HttpMethod.GET, "/user/me", "/auth/session").authenticated()
 
                     // Master data, imports, replenishment and management reports: administrators only
                     .requestMatchers(HttpMethod.POST, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
@@ -52,13 +52,22 @@ public class SecurityConfig {
                     .requestMatchers("/user/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/monitoring/**").hasAnyAuthority("ADMIN", "MASTER")
 
-                    // Stock, surgeries, loans and pending issues: authenticated; per-hospital access
+                    // Stock, surgeries and pending issues: authenticated; per-hospital access
                     // is enforced in the services (surgical techs only see the hospitals they work at)
-                    .anyRequest().authenticated()
+                    // Operations: surgical techs and administrators only
+                    .requestMatchers("/surgeries/**", "/pending-issues/**").hasAnyAuthority("SURGICAL_TECH", "ADMIN", "MASTER")
+
+                    // Read-only queries (stock, hospitals, materials): any authenticated user.
+                    // Per-hospital access is enforced in the services: non-admin users
+                    // (USER and SURGICAL_TECH) only see the hospitals they are assigned to.
+                    .requestMatchers(HttpMethod.GET, "/stock/**", "/hospitals/**", "/materials/**").authenticated()
+
+                    // Anything else: administrators only
+                    .anyRequest().hasAnyAuthority("ADMIN", "MASTER")
             )
             .exceptionHandling(ex -> ex
                     .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Not authenticated"))
-                    .accessDeniedHandler((req, res, e) -> res.sendError(403, "Acesso negado")))
+                    .accessDeniedHandler((req, res, e) -> res.sendError(403, "Acess denied")))
             .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }       

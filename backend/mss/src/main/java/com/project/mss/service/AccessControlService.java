@@ -48,7 +48,7 @@ public class AccessControlService {
     }
 
     /** Loads the hospital and ensures the current user can access it. */
-    public Hospital isHospitalAllowed(Long hospitalId) {
+    public Hospital requireHospitalAccess(Long hospitalId) {
         Hospital hospital = hospitalRepository.findById(hospitalId)
                 .orElseThrow(() -> new EntityNotFoundException("Hospital " + hospitalId + " not found"));
         User user = currentUser();

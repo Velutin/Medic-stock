@@ -60,8 +60,8 @@ public class PendingIssueService {
             }
             Lot lot = materialService.findLot(dto.lotId());
             var surgery = surgeryService.load(p.getSurgery().getId());
-            ReadSource origem = p.getReadSource() != null ? p.getReadSource() : ReadSource.MANUAL;
-            surgeryService.recordLot(surgery, lot, p.getQuantity(), origem);
+            ReadSource readSource = p.getReadSource() != null ? p.getReadSource() : ReadSource.MANUAL;
+            surgeryService.recordLot(surgery, lot, p.getQuantity(), readSource);
             p.setStatus(PendingIssueStatus.RESOLVED);
         } else {
             p.setStatus(PendingIssueStatus.DISCARDED);

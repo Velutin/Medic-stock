@@ -5,6 +5,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import java.util.Set;
+
+import com.project.mss.model.enums.UserRole;
+
 public record UserRegDTO(
         @NotBlank
         String username,
@@ -15,5 +19,7 @@ public record UserRegDTO(
         String password,
         @NotBlank
         @Email
-        String email
+        String email,
+        UserRole role,
+        Set<Long> hospitalIds
 ) { }

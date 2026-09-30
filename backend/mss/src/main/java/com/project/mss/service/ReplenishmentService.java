@@ -69,7 +69,7 @@ public class ReplenishmentService {
 
     @Transactional(readOnly = true)
     public List<ReplenishmentSuggestionDTO> suggestion(Long hospitalId, boolean onlyWithShortage) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         LocalDate today = LocalDate.now();
         List<ReplenishmentSuggestionDTO> result = new ArrayList<>();
 
@@ -110,7 +110,7 @@ public class ReplenishmentService {
     @Transactional
     public DeliveryDTO executeReplenishment(ExecuteReplenishmentDTO dto) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
         LocalDate today = LocalDate.now();
 
         Delivery delivery = new Delivery();
@@ -134,7 +134,7 @@ public class ReplenishmentService {
 
     @Transactional(readOnly = true)
     public List<DeliveryDTO> listDeliveries(Long hospitalId) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         return deliveryRepository.findTop50ByHospitalIdOrderByCreatedAtDesc(hospitalId).stream()
                 .map(DeliveryDTO::of).toList();
     }
@@ -143,7 +143,7 @@ public class ReplenishmentService {
     public Delivery loadDelivery(Long id) {
         Delivery e = deliveryRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Delivery " + id + " not found"));
-        accessControlService.isHospitalAllowed(e.getHospital().getId());
+        accessControlService.requireHospitalAccess(e.getHospital().getId());
         return e;
     }
 
@@ -152,7 +152,7 @@ public class ReplenishmentService {
     @Transactional
     public SupplierOrderDTO generateOrder(SupplierOrderFormDTO dto) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
 
         SupplierOrder p = new SupplierOrder();
         p.setHospital(hospital);
@@ -182,7 +182,7 @@ public class ReplenishmentService {
 
     @Transactional(readOnly = true)
     public List<SupplierOrderDTO> listOrders(Long hospitalId) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         return supplierOrderRepository.findTop50ByHospitalIdOrderByCreatedAtDesc(hospitalId).stream()
                 .map(SupplierOrderDTO::of).toList();
     }
@@ -191,7 +191,7 @@ public class ReplenishmentService {
     public SupplierOrder loadOrder(Long id) {
         SupplierOrder p = supplierOrderRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Order " + id + " not found"));
-        accessControlService.isHospitalAllowed(p.getHospital().getId());
+        accessControlService.requireHospitalAccess(p.getHospital().getId());
         return p;
     }
 

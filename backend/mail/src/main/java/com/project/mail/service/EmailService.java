@@ -30,7 +30,7 @@ public class EmailService {
     public Email sendEmail(Email email) {
         if (email.getEmailTo().equals(email.getEmailFrom())) {
             System.out.println("Attempt to send an email to the same address: " + email.getEmailTo());
-            email.setStatus(EmailStatus.FALHA);
+            email.setStatus(EmailStatus.FAILED);
             return emailRepository.save(email);
         }
         try{
@@ -43,9 +43,9 @@ public class EmailService {
             message.setText(email.getBody());
             mailSender.send(message);
 
-            email.setStatus(EmailStatus.ENVIADO);
+            email.setStatus(EmailStatus.SENT);
         } catch (MailException e) {
-            email.setStatus(EmailStatus.FALHA);
+            email.setStatus(EmailStatus.FAILED);
         }
         return emailRepository.save(email);
     }

@@ -71,7 +71,7 @@ public class SurgeryService {
 
     @Transactional
     public SurgeryDTO create(SurgeryFormDTO dto) {
-        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
         User current = accessControlService.currentUser();
 
         User surgicalTech = current;
@@ -104,7 +104,7 @@ public class SurgeryService {
     @Transactional(readOnly = true)
     public Page<SurgerySummaryDTO> list(Long hospitalId, LocalDate start, LocalDate end, Pageable pageable) {
         Set<Long> hospitals = hospitalId != null
-                ? Set.of(accessControlService.isHospitalAllowed(hospitalId).getId())
+                ? Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
                 : accessControlService.allowedHospitals();
         if (hospitals.isEmpty()) return Page.empty(pageable);
         LocalDate i = start != null ? start : LocalDate.now().minusDays(30);
@@ -227,7 +227,7 @@ public class SurgeryService {
     public Surgery load(Long id) {
         Surgery c = surgeryRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Surgery " + id + " not found"));
-        accessControlService.isHospitalAllowed(c.getHospital().getId());
+        accessControlService.requireHospitalAccess(c.getHospital().getId());
         return c;
     }
 

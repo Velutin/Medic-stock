@@ -45,11 +45,11 @@ public class LoanService {
             throw new BusinessRuleException("Source and destination must be different hospitals. "
                     + "To move storeroom material into its own hospital, use replenishment.");
         }
-        Hospital origem = accessControlService.isHospitalAllowed(dto.sourceHospitalId());
-        Hospital destination = accessControlService.isHospitalAllowed(dto.destinationHospitalId());
+        Hospital source = accessControlService.requireHospitalAccess(dto.sourceHospitalId());
+        Hospital destination = accessControlService.requireHospitalAccess(dto.destinationHospitalId());
 
         Loan e = new Loan();
-        e.setSourceHospital(origem);
+        e.setSourceHospital(source);
         e.setSourceLocation(dto.sourceLocation());
         e.setDestinationHospital(destination);
         e.setNotes(dto.notes());
@@ -59,7 +59,7 @@ public class LoanService {
         for (LoanFormDTO.LoanRequestItem item : dto.items()) {
             Lot lot = materialService.findLot(item.lotId());
             stockService.transfer(MovementType.LOAN, lot, item.quantity(),
-                    origem, dto.sourceLocation(), destination, Location.HOSPITAL,
+                    source, dto.sourceLocation(), destination, Location.HOSPITAL,
                     e.getId(), null, "Loan #" + e.getId());
             e.getItems().add(new LoanItem(e, lot, item.quantity()));
         }

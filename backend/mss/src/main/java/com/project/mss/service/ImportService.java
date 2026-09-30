@@ -112,7 +112,7 @@ public class ImportService {
     @Transactional
     public ImportResultDTO prices(Long hospitalId, MultipartFile file, boolean createNewRefs) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(hospitalId);
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         List<String> errors = new ArrayList<>();
         int read = 0, ok = 0, ignored = 0;
 
@@ -149,7 +149,7 @@ public class ImportService {
     public ImportResultDTO stock(Long hospitalId, MultipartFile file, Location defaultLocation,
                                           StockImportMode mode) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(hospitalId);
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         return process(file, new String[]{"REF", "LOTE", "VALIDADE", "QUANTIDADE"}, (row, col, errors) -> {
             String ref = text(row, col.get("REF")).trim();
             String lotNumber = text(row, col.get("LOTE")).trim();
@@ -190,7 +190,7 @@ public class ImportService {
     @Transactional
     public ImportResultDTO minimums(Long hospitalId, MultipartFile file) {
         accessControlService.requireManager();
-        Hospital hospital = accessControlService.isHospitalAllowed(hospitalId);
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         return process(file, new String[]{"REF", "IDEAL", "IDEALTOTAL"}, (row, col, errors) -> {
             String ref = text(row, col.get("REF")).trim();
             if (ref.isBlank()) return false;

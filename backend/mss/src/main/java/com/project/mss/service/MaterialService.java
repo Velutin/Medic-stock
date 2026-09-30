@@ -153,7 +153,7 @@ public class MaterialService {
 
     @Transactional(readOnly = true)
     public List<PriceDTO> hospitalTable(Long hospitalId) {
-        accessControlService.isHospitalAllowed(hospitalId);
+        accessControlService.requireHospitalAccess(hospitalId);
         return hospitalPriceRepository.listByHospital(hospitalId).stream().map(PriceDTO::of).toList();
     }
 

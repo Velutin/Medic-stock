@@ -42,7 +42,7 @@ public class HospitalService {
 
     @Transactional(readOnly = true)
     public HospitalDTO find(Long id) {
-        return HospitalDTO.of(accessControlService.isHospitalAllowed(id));
+        return HospitalDTO.of(accessControlService.requireHospitalAccess(id));
     }
 
     @Transactional

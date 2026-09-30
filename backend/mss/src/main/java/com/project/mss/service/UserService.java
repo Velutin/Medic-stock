@@ -12,6 +12,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.repository.HospitalRepository;
 import com.project.mss.dto.user.ChangePasswordDTO;
 import com.project.mss.dto.user.ChangeRoleDTO;
 import com.project.mss.dto.user.ForgotPasswordDTO;
@@ -39,18 +40,20 @@ public class UserService {
     
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final HospitalRepository hospitalRepository;    
     private final TokenService tokenService;
     private final EmailService emailService;
     private final PasswordResetTokenService passwordResetTokenService;
     private final BCryptPasswordEncoder passwordEncoder;
 
     public UserService(AuthenticationManager authenticationManager, UserRepository userRepository,
-                       RoleRepository roleRepository, TokenService tokenService, EmailService emailService,                       
+                       RoleRepository roleRepository, HospitalRepository hospitalRepository, TokenService tokenService, EmailService emailService,                       
                        PasswordResetTokenService passwordResetTokenService) {
         this.authenticationManager = authenticationManager;        
         
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
+        this.hospitalRepository =hospitalRepository;
         this.tokenService = tokenService;
         this.emailService = emailService;
         this.passwordResetTokenService = passwordResetTokenService;
@@ -83,6 +86,22 @@ public class UserService {
         Role defaultRole = roleRepository.findByRole(UserRole.USER.name())
                 .orElseThrow(() -> new EntityNotFoundException("Role USER not found"));
         User user = new User(newUser.username(), newUser.email(), encodedPassword, defaultRole);
+        if (newUser.role() != null && newUser.role() != UserRole.USER) {
+            if (newUser.role() == UserRole.MASTER) {
+                throw new BusinessRuleException("The MASTER role cannot be assigned at registration");
+            }
+            Role extraRole = roleRepository.findByRole(newUser.role().name())
+                    .orElseThrow(() -> new EntityNotFoundException("Role " + newUser.role() + " not found"));
+            user.addRole(extraRole);
+        }
+
+        if (newUser.hospitalIds() != null && !newUser.hospitalIds().isEmpty()) {
+            var hospitals = hospitalRepository.findAllById(newUser.hospitalIds());
+            if (hospitals.size() != newUser.hospitalIds().size()) {
+                throw new EntityNotFoundException("One or more hospitals do not exist");
+            }
+            user.getHospitals().addAll(hospitals);
+        }
         userRepository.save(user);
         emailService.sendUserRegistrationEmail(user.getId(),user.getEmail());
     }

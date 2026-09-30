@@ -95,12 +95,12 @@ public class ReportService {
                 .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
                         i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
                 .toList();
-        String origem = e.getSourceHospital().getName()
+        String sourceName = e.getSourceHospital().getName()
                 + (e.getSourceLocation() == Location.STOREROOM ? " (material da sala)" : " (estoque do hospital)");
         return pdfService.generate(new PdfService.Report(
                 "EMPRÉSTIMO DE MATERIAIS ENTRE HOSPITAIS",
                 List.of(new String[]{"Empréstimo nº:", String.valueOf(e.getId())},
-                        new String[]{"Origem:", origem},
+                        new String[]{"Origem:", sourceName},
                         new String[]{"Destino:", e.getDestinationHospital().getName()},
                         new String[]{"Data:", e.getCreatedAt().format(DATE_TIME)},
                         new String[]{"Observação:", e.getNotes()}),
@@ -180,7 +180,7 @@ public class ReportService {
     /** Hospital stock as Excel, with the size identification color on each row. */
     @Transactional(readOnly = true)
     public byte[] stockSpreadsheet(Long hospitalId) {
-        Hospital hospital = accessControlService.isHospitalAllowed(hospitalId);
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         List<StockRowDTO> rows = stockService.hospitalView(hospitalId, false);
 
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
