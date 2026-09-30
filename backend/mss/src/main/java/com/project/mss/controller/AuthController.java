@@ -1,0 +1,106 @@
+package com.project.mss.controller;
+
+import java.util.List;
+
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.project.mss.dto.user.LoginDTO;
+import com.project.mss.dto.user.UserRegDTO;
+import com.project.mss.dto.user.UserResponseDTO;
+import com.project.mss.service.UserService;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+
+@RestController
+@RequestMapping("/auth")
+@Tag(name = "Authentication",description = "User authentication and registration endpoints")
+public class AuthController {
+
+    private final UserService userService;
+
+    public AuthController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @PostMapping("/login")
+    @Operation(summary = "User login", description = "Authenticates a user.")
+    public ResponseEntity<Object> login(@RequestBody @Valid LoginDTO login) {
+        String token = userService.login(login);
+        
+        ResponseCookie cookie = ResponseCookie.from("accessToken", token)
+                .httpOnly(true)
+                .secure(false)
+                .path("/")
+                .maxAge(24 * 60 * 60)
+                .sameSite("Strict")
+                .build();
+        
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(java.util.Map.of("message", "Login successful"));
+    }
+
+    @PostMapping("/register")
+    @Operation(summary = "User registration", description = "Registers a new user (ADMIN/MASTER only).")
+    public ResponseEntity<String> register(@RequestBody @Valid UserRegDTO newUser) {
+        userService.register(newUser);
+        return ResponseEntity.status(HttpStatus.CREATED).body("User registered successfully");
+    }
+
+    @PostMapping("/logout")
+    @Operation(summary = "Logout", description = "Clears the access cookie.")
+    public ResponseEntity<String> logout() {
+        ResponseCookie cookie = ResponseCookie.from("accessToken", "") 
+                .httpOnly(true)
+                .secure(false)
+                .path("/")
+                .maxAge(0)
+                .sameSite("Strict")
+                .build();
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body("Logout successful");
+    }
+
+    @GetMapping("/session")
+    @Operation(summary = "Get current user", description = "Returns the logged-in user based on the cookie.")
+    public ResponseEntity<UserResponseDTO> getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            
+            var userEntity = userService.findUserDTOByUsername(userDetails.getUsername()); 
+            
+            List<String> roles = userEntity.getAuthorities().stream()
+                    .map(authority -> authority.getAuthority())
+                    .toList();
+
+            UserResponseDTO userDTO = new UserResponseDTO(
+                userEntity.getId(),
+                userEntity.getUsername(),
+                userEntity.getEmail(),
+                userEntity.isEnabled(),
+                roles
+            );
+            
+            return ResponseEntity.ok(userDTO);
+        }
+        
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    }
+}

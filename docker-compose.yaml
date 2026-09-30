@@ -1,0 +1,73 @@
+services:
+  # PostgreSQL for the inventory service (MSS)
+  postgres-mss:
+    image: postgres:16
+    container_name: mss_db
+    environment:
+      POSTGRES_DB: mssdb
+      POSTGRES_USER: mss
+      POSTGRES_PASSWORD: msspass
+      TZ: America/Bahia
+    ports:
+      - "5440:5432"
+    volumes:
+      - postgres-mss-data:/var/lib/postgresql/data
+    networks:
+      - mss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # PostgreSQL for the mail service
+  postgres-mail:
+    image: postgres:16
+    container_name: mss_email_db
+    environment:
+      POSTGRES_DB: mssemaildb
+      POSTGRES_USER: email
+      POSTGRES_PASSWORD: msemailpass
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-mail-data:/var/lib/postgresql/data
+    networks:
+      - mss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - mss-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres-mss-data:
+  postgres-mail-data:
+  rabbitmq-data:
+
+networks:
+  mss-network:
+    driver: bridge

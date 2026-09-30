@@ -1,0 +1,239 @@
+package com.project.mss.service;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.project.mss.dto.stock.StockAdjustmentDTO;
+import com.project.mss.dto.stock.StockEntryDTO;
+import com.project.mss.dto.stock.StockRowDTO;
+import com.project.mss.dto.stock.StockMovementDTO;
+import com.project.mss.dto.stock.LotBalanceDTO;
+import com.project.mss.exception.BusinessRuleException;
+import com.project.mss.model.entity.Stock;
+import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.entity.Lot;
+import com.project.mss.model.entity.Material;
+import com.project.mss.model.entity.StockMovement;
+import com.project.mss.model.enums.Location;
+import com.project.mss.model.enums.MovementType;
+import com.project.mss.repository.StockRepository;
+import com.project.mss.repository.StockMovementRepository;
+
+/**
+ * Single entry point for balance changes. Every change goes through debit/credit and
+ * writes a stock_movement record, keeping the history auditable.
+ */
+@Service
+public class StockService {
+
+    private final StockRepository stockRepository;
+    private final StockMovementRepository stockMovementRepository;
+    private final MaterialService materialService;
+    private final AccessControlService accessControlService;
+
+    public StockService(StockRepository stockRepository, StockMovementRepository stockMovementRepository,
+                          MaterialService materialService, AccessControlService accessControlService) {
+        this.stockRepository = stockRepository;
+        this.stockMovementRepository = stockMovementRepository;
+        this.materialService = materialService;
+        this.accessControlService = accessControlService;
+    }
+
+    // ============================================================ base operations
+
+    public int balance(Lot lot, Hospital hospital, Location location) {
+        return stockRepository.lock(lot.getId(), hospital.getId(), location)
+                .map(Stock::getQuantity).orElse(0);
+    }
+
+    @Transactional
+    public void debit(Lot lot, Hospital hospital, Location location, int quantity) {
+        Stock e = stockRepository.lock(lot.getId(), hospital.getId(), location)
+                .orElseThrow(() -> noBalance(lot, hospital, location, 0, quantity));
+        if (e.getQuantity() < quantity) {
+            throw noBalance(lot, hospital, location, e.getQuantity(), quantity);
+        }
+        e.setQuantity(e.getQuantity() - quantity);
+        stockRepository.save(e);
+    }
+
+    @Transactional
+    public void credit(Lot lot, Hospital hospital, Location location, int quantity) {
+        Stock e = stockRepository.lock(lot.getId(), hospital.getId(), location)
+                .orElseGet(() -> new Stock(lot, hospital, location));
+        e.setQuantity(e.getQuantity() + quantity);
+        stockRepository.save(e);
+    }
+
+    /** Transfers between (hospital, location) pairs and records the movement. */
+    @Transactional
+    public StockMovement transfer(MovementType type, Lot lot, int quantity,
+                                   Hospital origem, Location locOrigem,
+                                   Hospital destination, Location destinationLocation,
+                                   Long loanId, Long deliveryId, String notes) {
+        debit(lot, origem, locOrigem, quantity);
+        credit(lot, destination, destinationLocation, quantity);
+        StockMovement m = newMovement(type, lot, quantity);
+        m.setSourceHospital(origem);
+        m.setSourceLocation(locOrigem);
+        m.setDestinationHospital(destination);
+        m.setDestinationLocation(destinationLocation);
+        m.setLoanId(loanId);
+        m.setDeliveryId(deliveryId);
+        m.setNotes(notes);
+        return stockMovementRepository.save(m);
+    }
+
+    @Transactional
+    public StockMovement recordSurgeryWithdrawal(Lot lot, int quantity, Hospital hospital, Long surgeryId) {
+        debit(lot, hospital, Location.HOSPITAL, quantity);
+        StockMovement m = newMovement(MovementType.SURGERY_WITHDRAWAL, lot, quantity);
+        m.setSourceHospital(hospital);
+        m.setSourceLocation(Location.HOSPITAL);
+        m.setSurgeryId(surgeryId);
+        return stockMovementRepository.save(m);
+    }
+
+    @Transactional
+    public StockMovement reverseSurgeryWithdrawal(Lot lot, int quantity, Hospital hospital, Long surgeryId,
+                                              String reason) {
+        credit(lot, hospital, Location.HOSPITAL, quantity);
+        StockMovement m = newMovement(MovementType.SURGERY_REVERSAL, lot, quantity);
+        m.setDestinationHospital(hospital);
+        m.setDestinationLocation(Location.HOSPITAL);
+        m.setSurgeryId(surgeryId);
+        m.setNotes(reason);
+        return stockMovementRepository.save(m);
+    }
+
+    @Transactional
+    public StockMovement recordEntry(Lot lot, int quantity, Hospital hospital, Location location, String notes) {
+        credit(lot, hospital, location, quantity);
+        StockMovement m = newMovement(MovementType.ENTRY, lot, quantity);
+        m.setDestinationHospital(hospital);
+        m.setDestinationLocation(location);
+        m.setNotes(notes);
+        return stockMovementRepository.save(m);
+    }
+
+    /** Sets the absolute balance (inventory). Records the difference as INVENTORY_ADJUSTMENT. */
+    @Transactional
+    public void adjustBalance(Lot lot, Hospital hospital, Location location, int countedQuantity,
+                             String reason) {
+        Stock e = stockRepository.lock(lot.getId(), hospital.getId(), location)
+                .orElseGet(() -> new Stock(lot, hospital, location));
+        int difference = countedQuantity - e.getQuantity();
+        if (difference == 0) return;
+        e.setQuantity(countedQuantity);
+        stockRepository.save(e);
+
+        StockMovement m = newMovement(MovementType.INVENTORY_ADJUSTMENT, lot, difference);
+        if (difference > 0) {
+            m.setDestinationHospital(hospital);
+            m.setDestinationLocation(location);
+        } else {
+            m.setSourceHospital(hospital);
+            m.setSourceLocation(location);
+        }
+        m.setNotes(reason);
+        stockMovementRepository.save(m);
+    }
+
+    // ============================================================ use cases
+
+    @Transactional
+    public void manualEntry(StockEntryDTO dto) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Material material = materialService.findByRef(dto.ref());
+        Lot lot = materialService.getOrCreateLot(material, dto.lot(), dto.expiryDate());
+        recordEntry(lot, dto.quantity(), hospital, dto.location(), "Manual entry");
+    }
+
+    @Transactional
+    public void manualAdjustment(StockAdjustmentDTO dto) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.isHospitalAllowed(dto.hospitalId());
+        Lot lot = materialService.findLot(dto.lotId());
+        adjustBalance(lot, hospital, dto.location(), dto.countedQuantity(), dto.reason());
+    }
+
+    /**
+     * Hospital stock view in spreadsheet layout: one row per lot,
+     * with the balance inside the hospital and the storeroom balance assigned to it.
+     */
+    @Transactional(readOnly = true)
+    public List<StockRowDTO> hospitalView(Long hospitalId, boolean includeExpired) {
+        accessControlService.isHospitalAllowed(hospitalId);
+        LocalDate today = LocalDate.now();
+        Map<Long, int[]> balances = new LinkedHashMap<>();
+        Map<Long, Lot> lots = new LinkedHashMap<>();
+        for (Stock e : stockRepository.listByHospital(hospitalId)) {
+            Lot l = e.getLot();
+            if (!includeExpired && l.isExpired(today)) continue;
+            lots.putIfAbsent(l.getId(), l);
+            int[] s = balances.computeIfAbsent(l.getId(), k -> new int[2]);
+            if (e.getLocation() == Location.HOSPITAL) s[0] += e.getQuantity();
+            else s[1] += e.getQuantity();
+        }
+        List<StockRowDTO> rows = new ArrayList<>();
+        lots.forEach((id, l) -> {
+            Material m = l.getMaterial();
+            int[] s = balances.get(id);
+            rows.add(new StockRowDTO(m.getId(), m.getRef(), m.getDescription(), m.getComponent(),
+                    m.getSize(), m.getColor(), l.getId(), l.getNumber(), l.getExpiryDate(), l.isExpired(today),
+                    s[0], s[1]));
+        });
+        return rows;
+    }
+
+    @Transactional(readOnly = true)
+    public List<LotBalanceDTO> findLotLocations(Long lotId) {
+        var allowed = accessControlService.allowedHospitals();
+        return stockRepository.listByLot(lotId).stream()
+                .filter(e -> allowed.contains(e.getHospital().getId()))
+                .map(e -> new LotBalanceDTO(e.getHospital().getId(), e.getHospital().getName(), e.getLocation(),
+                        e.getQuantity()))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<StockMovementDTO> history(Long hospitalId, LocalDate start, LocalDate end, Pageable pageable) {
+        accessControlService.isHospitalAllowed(hospitalId);
+        LocalDateTime i = (start != null ? start : LocalDate.now().minusDays(30)).atStartOfDay();
+        LocalDateTime f = (end != null ? end : LocalDate.now()).plusDays(1).atStartOfDay().minusNanos(1);
+        return stockMovementRepository.listByHospital(hospitalId, i, f, pageable).map(StockMovementDTO::of);
+    }
+
+    // ============================================================ helpers
+
+    private StockMovement newMovement(MovementType type, Lot lot, int quantity) {
+        StockMovement m = new StockMovement();
+        m.setType(type);
+        m.setLot(lot);
+        m.setQuantity(quantity);
+        try {
+            m.setUser(accessControlService.currentUser());
+        } catch (RuntimeException withoutUser) {
+            m.setUser(null); // automated processes
+        }
+        return m;
+    }
+
+    private BusinessRuleException noBalance(Lot lot, Hospital hospital, Location loc, int available, int requested) {
+        String where = loc == Location.STOREROOM ? "in the storeroom (assigned to " + hospital.getName() + ")"
+                                              : "at " + hospital.getName();
+        return new BusinessRuleException(String.format(
+                "Insufficient balance for lot %s (REF %s) %s: available %d, requested %d",
+                lot.getNumber(), lot.getMaterial().getRef(), where, available, requested));
+    }
+}
