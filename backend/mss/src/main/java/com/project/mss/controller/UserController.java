@@ -1,5 +1,6 @@
 package com.project.mss.controller;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
@@ -61,7 +62,7 @@ public class UserController {
 
     @GetMapping("/all")
     @Operation(summary = "List all users", description = "Returns a paginated list of all users. Requires ADMIN or MASTER.")
-    public ResponseEntity<Page<UserResponseDTO>> getAllUsers(Pageable pageable) {
+    public ResponseEntity<Page<UserResponseDTO>> getAllUsers(@ParameterObject Pageable pageable) {
         Page<UserResponseDTO> users = userService.getAllUsers(pageable);
         if (users.isEmpty()) {
             return ResponseEntity.noContent().build();

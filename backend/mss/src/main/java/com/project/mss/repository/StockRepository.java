@@ -49,4 +49,12 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
            WHERE e.lot.id = :lotId AND e.quantity > 0
            """)
     List<Stock> listByLot(@Param("lotId") Long lotId);
+
+@Query("""
+           SELECT e FROM Stock e
+           JOIN FETCH e.lot l JOIN FETCH e.hospital h
+           WHERE l.material.id IN :materialIds AND e.quantity > 0
+           ORDER BY h.name, l.expiryDate, l.number
+           """)
+    List<Stock> listByMaterials(@Param("materialIds") java.util.Collection<Long> materialIds);
 }

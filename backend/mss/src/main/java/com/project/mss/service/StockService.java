@@ -11,7 +11,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageImpl;
 
+
+import com.project.mss.dto.material.MaterialDTO;
+import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockAdjustmentDTO;
 import com.project.mss.dto.stock.StockEntryDTO;
 import com.project.mss.dto.stock.StockRowDTO;
@@ -194,6 +198,66 @@ public class StockService {
                     s[0], s[1]));
         });
         return rows;
+    }
+    /**
+     * Stock of every material matching the term (REF, name or description, partial match),
+     * per hospital and per lot, restricted to the hospitals the user can see.
+     * With hospitalId, only that hospital is returned. Totals ignore expired lots.
+     */
+    @Transactional(readOnly = true)
+        public Page<MaterialStockDTO> materialStock(String term, Long hospitalId, boolean includeExpired,
+                                                Pageable pageable) {
+        Page<MaterialDTO> page = materialService.find(term, pageable);
+        List<MaterialDTO> materials = page.getContent();
+        if (materials.isEmpty()) return new PageImpl<>(List.of(), pageable, page.getTotalElements());
+
+        var allowed = hospitalId != null
+                ? java.util.Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
+                : accessControlService.allowedHospitals();
+        LocalDate today = LocalDate.now();
+
+        // materialId -> hospitalId -> lotId -> {hospital, storeroom}
+        Map<Long, Map<Long, Map<Long, int[]>>> byMaterial = new LinkedHashMap<>();
+        Map<Long, Hospital> hospitals = new LinkedHashMap<>();
+        Map<Long, Lot> lots = new LinkedHashMap<>();
+        List<Long> ids = materials.stream().map(MaterialDTO::id).toList();
+        for (Stock e : stockRepository.listByMaterials(ids)) {
+            Long hId = e.getHospital().getId();
+            if (!allowed.contains(hId)) continue;
+            Lot l = e.getLot();
+            if (!includeExpired && l.isExpired(today)) continue;
+            hospitals.putIfAbsent(hId, e.getHospital());
+            lots.putIfAbsent(l.getId(), l);
+            int[] q = byMaterial.computeIfAbsent(l.getMaterial().getId(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(hId, k -> new LinkedHashMap<>())
+                    .computeIfAbsent(l.getId(), k -> new int[2]);
+            if (e.getLocation() == Location.HOSPITAL) q[0] += e.getQuantity();
+            else q[1] += e.getQuantity();
+        }
+
+        List<MaterialStockDTO> result = new ArrayList<>();
+        for (MaterialDTO m : materials) {
+            List<MaterialStockDTO.HospitalStock> hospitalRows = new ArrayList<>();
+            int totalHospital = 0, totalStoreroom = 0;
+            for (var entry : byMaterial.getOrDefault(m.id(), Map.of()).entrySet()) {
+                Hospital h = hospitals.get(entry.getKey());
+                List<MaterialStockDTO.LotStock> lotRows = new ArrayList<>();
+                int hq = 0, sq = 0;
+                for (var le : entry.getValue().entrySet()) {
+                    Lot l = lots.get(le.getKey());
+                    int[] q = le.getValue();
+                    boolean expired = l.isExpired(today);
+                    lotRows.add(new MaterialStockDTO.LotStock(l.getId(), l.getNumber(), l.getExpiryDate(), expired, q[0], q[1]));
+                    if (!expired) { hq += q[0]; sq += q[1]; }
+                }
+                hospitalRows.add(new MaterialStockDTO.HospitalStock(h.getId(), h.getName(), hq, sq, hq + sq, lotRows));
+                totalHospital += hq;
+                totalStoreroom += sq;
+            }
+            result.add(new MaterialStockDTO(m.id(), m.ref(), m.component(), m.description(), m.size(), m.color(),
+                    totalHospital, totalStoreroom, totalHospital + totalStoreroom, hospitalRows));
+        }
+        return new PageImpl<>(result, pageable, page.getTotalElements());
     }
 
     @Transactional(readOnly = true)

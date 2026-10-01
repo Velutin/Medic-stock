@@ -2,6 +2,7 @@ package com.project.mss.controller;
 
 import java.util.List;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -36,7 +37,7 @@ public class MaterialController {
     @GetMapping
     @Operation(summary = "Search materials by REF or description")
     public Page<MaterialDTO> find(@RequestParam(required = false) String term,
-                                    @PageableDefault(size = 50) Pageable pageable) {
+                                    @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
         return materialService.find(term, pageable);
     }
 

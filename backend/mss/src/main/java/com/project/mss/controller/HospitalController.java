@@ -42,7 +42,7 @@ public class HospitalController {
     }
 
     @PostMapping
-    @Operation(summary = "Cadastrar hospital (ADMIN)")
+    @Operation(summary = "Create hospital (ADMIN)")
     public ResponseEntity<HospitalDTO> create(@RequestBody @Valid HospitalFormDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(hospitalService.create(dto));
     }

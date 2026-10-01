@@ -49,6 +49,6 @@ public class LoanController {
 
     @GetMapping("/{id}/pdf")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
-        return FileResponses.pdf(reportService.loanPdf(id), "emprestimo-" + id + ".pdf", true);
+        return FileResponses.pdf(reportService.loanPdf(id), "loan-" + id + ".pdf", true);
     }
 }

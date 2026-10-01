@@ -3,6 +3,7 @@ package com.project.mss.controller;
 import java.time.LocalDate;
 import java.util.List;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -47,7 +48,7 @@ public class SurgeryController {
     public Page<SurgerySummaryDTO> list(@RequestParam(required = false) Long hospitalId,
                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-                                          @PageableDefault(size = 30) Pageable pageable) {
+                                          @ParameterObject @PageableDefault(size = 30) Pageable pageable) {
         return surgeryService.list(hospitalId, start, end, pageable);
     }
 

@@ -16,7 +16,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping("/monitoring")
-@Tag(name = "Monitoramento", description = "Service monitoring endpoints")
+@Tag(name = "Monitoring", description = "Service monitoring endpoints")
 public class MonitoringController {
 
     private final DiscoveryClient discoveryClient;
