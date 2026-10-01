@@ -46,17 +46,19 @@ public class ReportService {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     private final PdfService pdfService;
-    private final ReplenishmentService replenishmentService;
+    private final DeliveryService deliveryService;
+    private final SupplierOrderService supplierOrderService;
     private final LoanService loanService;
     private final StockService stockService;
     private final SurgeryRepository surgeryRepository;
     private final AccessControlService accessControlService;
 
-    public ReportService(PdfService pdfService, ReplenishmentService replenishmentService,
-                            LoanService loanService, StockService stockService,
+    public ReportService(PdfService pdfService, DeliveryService deliveryService,
+                            SupplierOrderService supplierOrderService, LoanService loanService, StockService stockService,
                             SurgeryRepository surgeryRepository, AccessControlService accessControlService) {
         this.pdfService = pdfService;
-        this.replenishmentService = replenishmentService;
+        this.deliveryService = deliveryService;
+        this.supplierOrderService = supplierOrderService;
         this.loanService = loanService;
         this.stockService = stockService;
         this.surgeryRepository = surgeryRepository;
@@ -71,7 +73,7 @@ public class ReportService {
     /** Hospital delivery report, "Classic" layout, with signatures. */
     @Transactional(readOnly = true)
     public byte[] deliveryPdf(Long deliveryId) {
-        Delivery e = replenishmentService.loadDelivery(deliveryId);
+        Delivery e = deliveryService.load(deliveryId);
         List<String[]> rows = e.getItems().stream()
                 .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
                         i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
@@ -112,7 +114,7 @@ public class ReportService {
     /** Supplier order, to be sent via WhatsApp. */
     @Transactional(readOnly = true)
     public byte[] orderPdf(Long orderId) {
-        SupplierOrder p = replenishmentService.loadOrder(orderId);
+        SupplierOrder p = supplierOrderService.load(orderId);
         List<String[]> rows = p.getItems().stream()
                 .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> !i.getUrgent())
                         .thenComparing(i -> i.getMaterial().getRef()))

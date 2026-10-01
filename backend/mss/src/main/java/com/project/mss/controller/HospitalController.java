@@ -10,8 +10,10 @@ import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.PriceDTO;
 import com.project.mss.dto.hospital.UserHospitalsDTO;
+import com.project.mss.dto.replenishment.ReplenishmentSuggestionDTO;
 import com.project.mss.service.HospitalService;
 import com.project.mss.service.MaterialService;
+import com.project.mss.service.ReplenishmentService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,10 +26,13 @@ public class HospitalController {
 
     private final HospitalService hospitalService;
     private final MaterialService materialService;
+    private final ReplenishmentService replenishmentService;
 
-    public HospitalController(HospitalService hospitalService, MaterialService materialService) {
+    public HospitalController(HospitalService hospitalService, MaterialService materialService,
+                              ReplenishmentService replenishmentService) {
         this.hospitalService = hospitalService;
         this.materialService = materialService;
+        this.replenishmentService = replenishmentService;
     }
 
     @GetMapping
@@ -57,6 +62,14 @@ public class HospitalController {
     @Operation(summary = "Hospital price table")
     public List<PriceDTO> prices(@PathVariable Long id) {
         return materialService.hospitalTable(id);
+    }
+
+    @GetMapping("/{id}/replenishment-suggestions")
+    @Operation(summary = "What to replenish from the storeroom and what to order from the supplier (ADMIN)",
+               description = "Expired lots are ignored. onlyWithShortage=false also lists materials at their ideal level.")
+    public List<ReplenishmentSuggestionDTO> replenishmentSuggestions(@PathVariable Long id,
+                                                                     @RequestParam(defaultValue = "true") boolean onlyWithShortage) {
+        return replenishmentService.suggestion(id, onlyWithShortage);
     }
 
     @PutMapping("/users")

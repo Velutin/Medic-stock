@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.loan.LoanStatusUpdateDTO;
 import com.project.mss.dto.loan.LoanDTO;
 import com.project.mss.dto.loan.LoanFormDTO;
 import com.project.mss.exception.BusinessRuleException;
@@ -66,15 +67,24 @@ public class LoanService {
         return LoanDTO.of(loanRepository.save(e));
     }
 
+    /** Applies a status transition requested through PATCH /loans/{id}. */
     @Transactional
-    public LoanDTO markNotified(Long id) {
+    public LoanDTO updateStatus(Long id, LoanStatusUpdateDTO dto) {
         accessControlService.requireManager();
         Loan e = load(id);
-        e.setStatus(LoanStatus.NOTIFIED);
-        e.setNotifiedAt(LocalDateTime.now());
+        switch (dto.status()) {
+            case NOTIFIED -> {
+                if (e.getStatus() == LoanStatus.NOTIFIED) {
+                    throw new BusinessRuleException("Loan " + id + " was already notified");
+                }
+                e.setStatus(LoanStatus.NOTIFIED);
+                e.setNotifiedAt(LocalDateTime.now());
+            }
+            case PENDING_NOTIFICATION -> throw new BusinessRuleException("A notified loan cannot return to pending");
+        }
         return LoanDTO.of(loanRepository.save(e));
     }
-
+    
     @Transactional(readOnly = true)
     public List<LoanDTO> list(LoanStatus status) {
         var allowed = accessControlService.allowedHospitals();

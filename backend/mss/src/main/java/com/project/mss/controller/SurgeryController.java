@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.surgery.SurgeryDTO;
 import com.project.mss.dto.surgery.SurgeryFormDTO;
+import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgerySummaryDTO;
 import com.project.mss.dto.surgery.SheetItemsDTO;
 import com.project.mss.dto.surgery.WithdrawalResultDTO;
@@ -88,15 +89,11 @@ public class SurgeryController {
         return surgeryService.recordSheet(id, dto);
     }
 
-    @PatchMapping("/{id}/complete")
-    @Operation(summary = "Complete the surgery (requires no open pending issues)")
-    public SurgeryDTO complete(@PathVariable Long id) {
-        return surgeryService.complete(id);
-    }
-
-    @PatchMapping("/{id}/cancel")
-    @Operation(summary = "Cancel the surgery and return its items to the hospital stock")
-    public SurgeryDTO cancel(@PathVariable Long id, @RequestParam(required = false) String reason) {
-        return surgeryService.cancel(id, reason);
+    @PatchMapping("/{id}")
+    @Operation(summary = "Change the surgery status",
+               description = "COMPLETED requires no open pending issues. CANCELLED requires cancellationReason "
+                       + "and returns the items to the hospital stock. A surgery cannot be reopened.")
+    public SurgeryDTO updateStatus(@PathVariable Long id, @RequestBody @Valid SurgeryStatusUpdateDTO dto) {
+        return surgeryService.updateStatus(id, dto);
     }
 }

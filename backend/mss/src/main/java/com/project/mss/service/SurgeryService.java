@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgeryDTO;
 import com.project.mss.dto.surgery.SurgeryFormDTO;
 import com.project.mss.dto.surgery.SurgeryItemDTO;
@@ -143,8 +144,22 @@ public class SurgeryService {
         return toDTO(surgeryRepository.save(c));
     }
 
+    /** Applies a status transition requested through PATCH /surgeries/{id}. */
     @Transactional
-    public SurgeryDTO complete(Long id) {
+    public SurgeryDTO updateStatus(Long id, SurgeryStatusUpdateDTO dto) {
+        return switch (dto.status()) {
+            case COMPLETED -> complete(id);
+            case CANCELLED -> {
+                if (dto.cancellationReason() == null || dto.cancellationReason().isBlank()) {
+                    throw new BusinessRuleException("Cancellation reason is required");
+                }
+                yield cancel(id, dto.cancellationReason().trim());
+            }
+            case OPEN -> throw new BusinessRuleException("A surgery cannot be reopened");
+        };
+    }
+    
+    private SurgeryDTO complete(Long id) {
         Surgery c = loadOpen(id);
         if (c.getItems().isEmpty()) {
             throw new BusinessRuleException("The surgery has no recorded items");
@@ -159,8 +174,7 @@ public class SurgeryService {
     }
 
     /** Cancels the surgery, returns all items to the hospital stock and discards the pending issues. */
-    @Transactional
-    public SurgeryDTO cancel(Long id, String reason) {
+    private SurgeryDTO cancel(Long id, String reason) {
         Surgery c = load(id);
         if (c.getStatus() == SurgeryStatus.CANCELLED) {
             throw new BusinessRuleException("The surgery is already cancelled");

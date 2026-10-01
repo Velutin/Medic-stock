@@ -11,6 +11,7 @@ import com.project.mss.dto.loan.LoanFormDTO;
 import com.project.mss.model.enums.LoanStatus;
 import com.project.mss.service.LoanService;
 import com.project.mss.service.ReportService;
+import com.project.mss.dto.loan.LoanStatusUpdateDTO;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -41,10 +42,11 @@ public class LoanController {
         return loanService.list(status);
     }
 
-    @PatchMapping("/{id}/notified")
-    @Operation(summary = "Mark the supplier as notified (ADMIN)")
-    public LoanDTO notified(@PathVariable Long id) {
-        return loanService.markNotified(id);
+    @PatchMapping("/{id}")
+    @Operation(summary = "Change the loan status (ADMIN)",
+               description = "Use NOTIFIED once the supplier has been informed about the loan.")
+    public LoanDTO updateStatus(@PathVariable Long id, @RequestBody @Valid LoanStatusUpdateDTO dto) {
+        return loanService.updateStatus(id, dto);
     }
 
     @GetMapping("/{id}/pdf")

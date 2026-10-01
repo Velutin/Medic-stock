@@ -43,17 +43,15 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.POST, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PUT, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/imports/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers("/replenishment/**").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/reports/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers(HttpMethod.PATCH, "/pending-issues/**", "/loans/*/notified").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers(HttpMethod.PATCH, "/pending-issues/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/stock/entry", "/stock/adjustment").hasAnyAuthority("ADMIN", "MASTER")
 
                     // User management and monitoring
                     .requestMatchers("/user/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/monitoring/**").hasAnyAuthority("ADMIN", "MASTER")
 
-                    // Stock, surgeries and pending issues: authenticated; per-hospital access
-                    // is enforced in the services (surgical techs only see the hospitals they work at)
                     // Operations: surgical techs and administrators only
                     .requestMatchers("/surgeries/**", "/pending-issues/**").hasAnyAuthority("SURGICAL_TECH", "ADMIN", "MASTER")
 
@@ -67,7 +65,7 @@ public class SecurityConfig {
             )
             .exceptionHandling(ex -> ex
                     .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Not authenticated"))
-                    .accessDeniedHandler((req, res, e) -> res.sendError(403, "Acess denied")))
+                    .accessDeniedHandler((req, res, e) -> res.sendError(403, "Access denied")))
             .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }       
