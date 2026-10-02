@@ -8,19 +8,18 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.data.domain.PageImpl;
 
-
-import com.project.mss.dto.material.MaterialDTO;
-import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockAdjustmentDTO;
 import com.project.mss.dto.stock.StockEntryDTO;
 import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.stock.StockMovementDTO;
 import com.project.mss.dto.stock.LotBalanceDTO;
+import com.project.mss.dto.material.MaterialDTO;
+import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.Stock;
 import com.project.mss.model.entity.Hospital;
@@ -72,6 +71,7 @@ public class StockService {
 
     @Transactional
     public void credit(Lot lot, Hospital hospital, Location location, int quantity) {
+        requireValidLocation(hospital, location);
         Stock e = stockRepository.lock(lot.getId(), hospital.getId(), location)
                 .orElseGet(() -> new Stock(lot, hospital, location));
         e.setQuantity(e.getQuantity() + quantity);
@@ -133,6 +133,7 @@ public class StockService {
     @Transactional
     public void adjustBalance(Lot lot, Hospital hospital, Location location, int countedQuantity,
                              String reason) {
+        requireValidLocation(hospital, location);
         Stock e = stockRepository.lock(lot.getId(), hospital.getId(), location)
                 .orElseGet(() -> new Stock(lot, hospital, location));
         int difference = countedQuantity - e.getQuantity();
@@ -150,6 +151,14 @@ public class StockService {
         }
         m.setNotes(reason);
         stockMovementRepository.save(m);
+    }
+
+    /** A distribution center only keeps material in the storeroom. */
+    public static void requireValidLocation(Hospital hospital, Location location) {
+        if (hospital.isDistributionCenter() && location == Location.HOSPITAL) {
+            throw new BusinessRuleException(hospital.getName()
+                    + " is a distribution center: its material can only be in the storeroom");
+        }
     }
 
     // ============================================================ use cases
@@ -199,13 +208,14 @@ public class StockService {
         });
         return rows;
     }
+
     /**
      * Stock of every material matching the term (REF, name or description, partial match),
      * per hospital and per lot, restricted to the hospitals the user can see.
      * With hospitalId, only that hospital is returned. Totals ignore expired lots.
      */
     @Transactional(readOnly = true)
-        public Page<MaterialStockDTO> materialStock(String term, Long hospitalId, boolean includeExpired,
+    public Page<MaterialStockDTO> materialStock(String term, Long hospitalId, boolean includeExpired,
                                                 Pageable pageable) {
         Page<MaterialDTO> page = materialService.find(term, pageable);
         List<MaterialDTO> materials = page.getContent();

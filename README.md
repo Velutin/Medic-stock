@@ -30,14 +30,16 @@ On Windows PowerShell use `.\mvnw.cmd` and run each command on its own line.
 Swagger: http://localhost:8085/swagger-ui.html — initial user `admin` / `admin123` (change it on first login).
 
 Production environment variables for `mss`: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `JWT_SECRET`,
-`STORAGE_DIR`, `LOGO_PATH` (Baumer logo, PNG/JPG), `FRONTEND_URL`, `RABBITMQ_HOST`, `EUREKA_URL`.
+`STORAGE_DIR`, `LOGO_PATH` and `COMPANY_NAME` (report header), `FRONTEND_URL`, `RABBITMQ_HOST`, `EUREKA_URL`.
+
+Report logo: `backend/mss/branding/logo.png`. To change it, replace the file keeping the same name.
 
 ## Data model
 
 - `hospital` (+ `hospital_product_line`): served hospitals, price table type (SIGTAP/TENDER) and product lines (HIP, KNEE, SHOULDER).
 - `material`: catalog by REF, with GTIN (GS1 AI 01, identifies the REF when scanning), component, size and identification color.
 - `hospital_price`: REF value at each hospital; used on surgery withdrawals.
-- `lot`: number and mandatory expiry date (GS1 AI 10 and 17).
+- `lot`: number and mandatory expiry date (GS1 AI 10 and 17). A lot is identified by material + number + expiry date: units of the same lot sterilized on different days have different expiry dates and are separate records, each with its own balance.
 - `stock`: balance per lot + hospital + location (`STOREROOM` = in the storeroom, assigned to the hospital; `HOSPITAL` = inside the hospital).
 - `minimum_stock`: hospital "Ideal" and "Ideal total" (hospital + storeroom) per REF.
 - `surgery`, `surgery_item`, `pending_issue`: material withdrawals and scans that need review.

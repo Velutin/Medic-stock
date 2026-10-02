@@ -6,8 +6,8 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.project.mss.dto.loan.LoanStatusUpdateDTO;
 import com.project.mss.dto.loan.LoanDTO;
+import com.project.mss.dto.loan.LoanStatusUpdateDTO;
 import com.project.mss.dto.loan.LoanFormDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
@@ -48,6 +48,9 @@ public class LoanService {
         }
         Hospital source = accessControlService.requireHospitalAccess(dto.sourceHospitalId());
         Hospital destination = accessControlService.requireHospitalAccess(dto.destinationHospitalId());
+        if (source.isDistributionCenter() || destination.isDistributionCenter()) {
+            throw new BusinessRuleException("Loans cannot involve a distribution center. Use a distribution instead.");
+        }
 
         Loan e = new Loan();
         e.setSourceHospital(source);
@@ -84,7 +87,7 @@ public class LoanService {
         }
         return LoanDTO.of(loanRepository.save(e));
     }
-    
+
     @Transactional(readOnly = true)
     public List<LoanDTO> list(LoanStatus status) {
         var allowed = accessControlService.allowedHospitals();

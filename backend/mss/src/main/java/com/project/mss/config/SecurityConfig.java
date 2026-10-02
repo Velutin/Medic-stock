@@ -43,7 +43,7 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.POST, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PUT, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/imports/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/reports/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PATCH, "/pending-issues/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/stock/entry", "/stock/adjustment").hasAnyAuthority("ADMIN", "MASTER")

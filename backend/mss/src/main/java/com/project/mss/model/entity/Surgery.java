@@ -64,6 +64,16 @@ public class Surgery {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    @Column(name = "cancelled_at")
+    private LocalDateTime cancelledAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cancelled_by")
+    private User cancelledBy;
+
+    @Column(name = "cancellation_reason", length = 500)
+    private String cancellationReason;
+
     @OneToMany(mappedBy = "surgery", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     private List<SurgeryItem> items = new ArrayList<>();

@@ -70,24 +70,29 @@ public class ReportService {
     private static final String[] DELIVERY_COLUMNS = {"REF", "Material", "Lote", "Validade", "Qtd"};
     private static final float[] DELIVERY_WIDTHS = {1.4f, 4.2f, 1.6f, 1.1f, 0.6f};
 
-    /** Hospital delivery report, "Classic" layout, with signatures. */
+    /**
+     * Hospital delivery report, Classic layout. The material column uses the short name
+     * (component) and falls back to the description. Deliveries from a distribution center
+     * look the same: the material leaves the storeroom either way.
+     */
     @Transactional(readOnly = true)
     public byte[] deliveryPdf(Long deliveryId) {
         Delivery e = deliveryService.load(deliveryId);
         List<String[]> rows = e.getItems().stream()
-                .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
-                        i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
+                .map(i -> {
+                    var m = i.getLot().getMaterial();
+                    String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
+                    return new String[]{m.getRef(), name, i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()),
+                            String.valueOf(i.getQuantity())};
+                })
                 .toList();
         int total = e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
-        return pdfService.generate(new PdfService.Report(
-                "RELATÓRIO DE ENTREGA DE MATERIAIS",
-                List.of(new String[]{"Hospital:", e.getHospital().getName()},
-                        new String[]{"Entrega nº:", String.valueOf(e.getId())},
-                        new String[]{"Data:", e.getCreatedAt().format(DATE_TIME)},
-                        new String[]{"Observação:", e.getNotes()}),
-                DELIVERY_COLUMNS, DELIVERY_WIDTHS, rows,
-                "Total de itens: " + total,
-                new String[]{"Entregue por", "Recebido por (hospital)"}));
+        return pdfService.deliveryReport(new PdfService.DeliveryReport(
+                String.valueOf(e.getId()),
+                e.getHospital().getName(),
+                fmt(e.getCreatedAt().toLocalDate()),
+                e.getCreatedBy() != null ? e.getCreatedBy().getUsername() : "-",
+                rows, total, e.getNotes()));
     }
 
     @Transactional(readOnly = true)

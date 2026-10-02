@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.project.mss.dto.hospital.CoveredHospitalsDTO;
 import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.PriceDTO;
@@ -70,6 +71,13 @@ public class HospitalController {
     public List<ReplenishmentSuggestionDTO> replenishmentSuggestions(@PathVariable Long id,
                                                                      @RequestParam(defaultValue = "true") boolean onlyWithShortage) {
         return replenishmentService.suggestion(id, onlyWithShortage);
+    }
+
+    @PutMapping("/{id}/covered-hospitals")
+    @Operation(summary = "Set the hospitals supplied by a distribution center (ADMIN)",
+               description = "A hospital can belong to only one distribution center. An empty list removes every hospital.")
+    public HospitalDTO setCoveredHospitals(@PathVariable Long id, @RequestBody @Valid CoveredHospitalsDTO dto) {
+        return hospitalService.setCoveredHospitals(id, dto);
     }
 
     @PutMapping("/users")

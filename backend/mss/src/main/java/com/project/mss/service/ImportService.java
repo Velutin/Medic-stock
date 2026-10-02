@@ -166,7 +166,11 @@ public class ImportService {
                 String n = normalize(localTxt);
                 local = n.startsWith("SALA") || n.startsWith("STOREROOM") ? Location.STOREROOM : Location.HOSPITAL;
             }
+            if (local == null && hospital.isDistributionCenter()) local = Location.STOREROOM;
             if (local == null) throw new IllegalArgumentException("location not provided (SALA/STOREROOM or HOSPITAL)");
+            if (hospital.isDistributionCenter() && local == Location.HOSPITAL) {
+                throw new IllegalArgumentException("a distribution center only keeps material in the storeroom (SALA)");
+            }
 
             Material m = materialService.getOrCreate(ref, text(row, col.getOrDefault("DESCRICAO", col.get("MATERIAL"))));
             materialService.assignGtinIfMissing(m, text(row, col.get("GTIN")));

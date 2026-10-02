@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.lowagie.text.Chunk;
+import com.lowagie.text.ExceptionConverter;
 import com.lowagie.text.Document;
 import com.lowagie.text.Element;
 import com.lowagie.text.Font;
@@ -22,8 +23,13 @@ import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Phrase;
 import com.lowagie.text.Rectangle;
+import com.lowagie.text.pdf.BaseFont;
+import com.lowagie.text.pdf.ColumnText;
+import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
+import com.lowagie.text.pdf.PdfPageEventHelper;
+import com.lowagie.text.pdf.PdfTemplate;
 import com.lowagie.text.pdf.PdfWriter;
 import com.project.mss.exception.BusinessRuleException;
 
@@ -58,6 +64,123 @@ public class PdfService {
             String tableFooter,            // e.g. "Total de itens: 12"
             String[] signatures            // signature labels; empty to hide
     ) { }
+
+    /** Content of the delivery report (Classic layout). */
+    public record DeliveryReport(
+            String number,
+            String hospital,
+            String date,
+            String deliveredBy,
+            List<String[]> rows,   // REF, material, lot, expiry date, quantity
+            int totalPieces,
+            String notes           // optional; printed below the table when present
+    ) { }
+
+    private static final Color TEXT_MUTED = new Color(0x6B, 0x6B, 0x6B);
+    private static final Color BORDER = new Color(0xBF, 0xBF, 0xBF);
+
+    /**
+     * Delivery report, Classic layout: logo, title and number; boxes with hospital, date,
+     * delivered by and total pieces; item table with a total row; signatures; and a footer
+     * with the issue date and "page X of Y" on every page.
+     */
+    public byte[] deliveryReport(DeliveryReport r) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Document doc = new Document(PageSize.A4, 36, 36, 30, 50);
+            PdfWriter writer = PdfWriter.getInstance(doc, out);
+            writer.setPageEvent(new IssueFooter(LocalDateTime.now().format(DATE_TIME)));
+            doc.open();
+
+            Font fTitle = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 15);
+            Font fNumber = FontFactory.getFont(FontFactory.HELVETICA, 9, TEXT_MUTED);
+            Font fBoxLabel = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 7, TEXT_MUTED);
+            Font fBoxValue = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10);
+            Font fHeader = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8);
+            Font fCell = FontFactory.getFont(FontFactory.HELVETICA, 8);
+            Font fTotal = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9);
+            Font fText = FontFactory.getFont(FontFactory.HELVETICA, 9);
+
+            // Header: logo on the left, title and number on the right
+            PdfPTable header = new PdfPTable(new float[]{1.6f, 3f});
+            header.setWidthPercentage(100);
+            header.addCell(logoCell());
+            PdfPCell titleCell = new PdfPCell();
+            titleCell.setBorder(Rectangle.NO_BORDER);
+            titleCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            Paragraph title = new Paragraph("ENTREGA DE MATERIAIS", fTitle);
+            title.setAlignment(Element.ALIGN_RIGHT);
+            Paragraph number = new Paragraph("Entrega nº " + r.number(), fNumber);
+            number.setAlignment(Element.ALIGN_RIGHT);
+            titleCell.addElement(title);
+            titleCell.addElement(number);
+            header.addCell(titleCell);
+            header.setSpacingAfter(12);
+            doc.add(header);
+
+            // Information boxes
+            PdfPTable boxes = new PdfPTable(new float[]{2.6f, 1.3f, 1.6f, 1.1f});
+            boxes.setWidthPercentage(100);
+            boxes.addCell(infoBox("HOSPITAL", r.hospital(), fBoxLabel, fBoxValue));
+            boxes.addCell(infoBox("DATA DA ENTREGA", r.date(), fBoxLabel, fBoxValue));
+            boxes.addCell(infoBox("ENTREGUE POR", r.deliveredBy(), fBoxLabel, fBoxValue));
+            boxes.addCell(infoBox("TOTAL DE PEÇAS", String.valueOf(r.totalPieces()), fBoxLabel, fBoxValue));
+            boxes.setSpacingAfter(12);
+            doc.add(boxes);
+
+            // Items
+            String[] columns = {"REF", "MATERIAL", "LOTE", "VALIDADE", "QTD."};
+            PdfPTable table = new PdfPTable(new float[]{1.6f, 3.4f, 1.3f, 1.2f, 0.6f});
+            table.setWidthPercentage(100);
+            table.setHeaderRows(1);
+            for (int c = 0; c < columns.length; c++) {
+                PdfPCell cell = new PdfPCell(new Phrase(columns[c], fHeader));
+                cell.setBackgroundColor(HEADER_GRAY);
+                cell.setBorderColor(BORDER);
+                cell.setPadding(5);
+                cell.setHorizontalAlignment(c == columns.length - 1 ? Element.ALIGN_CENTER : Element.ALIGN_LEFT);
+                table.addCell(cell);
+            }
+            int i = 0;
+            for (String[] row : r.rows()) {
+                for (int c = 0; c < row.length; c++) {
+                    PdfPCell cell = new PdfPCell(new Phrase(row[c] == null ? "" : row[c], fCell));
+                    cell.setBorderColor(BORDER);
+                    cell.setPadding(4);
+                    cell.setHorizontalAlignment(c == row.length - 1 ? Element.ALIGN_CENTER : Element.ALIGN_LEFT);
+                    if (i % 2 == 1) cell.setBackgroundColor(ROW_GRAY);
+                    table.addCell(cell);
+                }
+                i++;
+            }
+            PdfPCell totalLabel = new PdfPCell(new Phrase("TOTAL", fTotal));
+            totalLabel.setColspan(columns.length - 1);
+            totalLabel.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            totalLabel.setBackgroundColor(HEADER_GRAY);
+            totalLabel.setBorderColor(BORDER);
+            totalLabel.setPadding(5);
+            table.addCell(totalLabel);
+            PdfPCell totalValue = new PdfPCell(new Phrase(String.valueOf(r.totalPieces()), fTotal));
+            totalValue.setHorizontalAlignment(Element.ALIGN_CENTER);
+            totalValue.setBackgroundColor(HEADER_GRAY);
+            totalValue.setBorderColor(BORDER);
+            totalValue.setPadding(5);
+            table.addCell(totalValue);
+            doc.add(table);
+
+            if (r.notes() != null && !r.notes().isBlank()) {
+                Paragraph notes = new Paragraph("Observações: " + r.notes(), fText);
+                notes.setSpacingBefore(8);
+                doc.add(notes);
+            }
+
+            addSignatureLines(doc, new String[]{"Entregue por", "Recebido por (nome legível e data)"}, fText);
+
+            doc.close();
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new BusinessRuleException("Failed to generate PDF: " + e.getMessage());
+        }
+    }
 
     public byte[] generate(Report r) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -156,6 +279,105 @@ public class PdfService {
             doc.add(p);
         }
         doc.add(new Paragraph(new Chunk(" ")));
+    }
+
+    /** Logo (or company name) aligned to the left, used by the delivery report header. */
+    private PdfPCell logoCell() throws Exception {
+        PdfPCell cell = new PdfPCell();
+        cell.setBorder(Rectangle.NO_BORDER);
+        cell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+        Path logo = logoPath == null || logoPath.isBlank() ? null : Paths.get(logoPath);
+        if (logo != null && Files.exists(logo)) {
+            Image img = Image.getInstance(Files.readAllBytes(logo));
+            img.scaleToFit(140, 50);
+            cell.addElement(img);
+        } else {
+            cell.addElement(new Paragraph(companyName.toUpperCase(), FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16)));
+        }
+        return cell;
+    }
+
+    private PdfPCell infoBox(String label, String value, Font fLabel, Font fValue) {
+        PdfPCell cell = new PdfPCell();
+        cell.setBorderColor(BORDER);
+        cell.setPadding(6);
+        cell.addElement(new Paragraph(label, fLabel));
+        cell.addElement(new Paragraph(value == null || value.isBlank() ? "-" : value, fValue));
+        return cell;
+    }
+
+    /** Signature lines side by side, label below each line (no separate date line). */
+    private void addSignatureLines(Document doc, String[] labels, Font font) throws Exception {
+        PdfPTable signatures = new PdfPTable(labels.length);
+        signatures.setWidthPercentage(100);
+        signatures.setSpacingBefore(45);
+        signatures.setKeepTogether(true);
+        for (String label : labels) {
+            PdfPCell c = new PdfPCell();
+            c.setBorder(Rectangle.NO_BORDER);
+            c.setPaddingLeft(14);
+            c.setPaddingRight(14);
+            Paragraph line = new Paragraph("________________________________________", font);
+            line.setAlignment(Element.ALIGN_CENTER);
+            Paragraph name = new Paragraph(label, font);
+            name.setAlignment(Element.ALIGN_CENTER);
+            c.addElement(line);
+            c.addElement(name);
+            signatures.addCell(c);
+        }
+        doc.add(signatures);
+    }
+
+    /** Footer on every page: issue date on the left, "Página X de Y" on the right. */
+    private static class IssueFooter extends PdfPageEventHelper {
+
+        private final String issuedAt;
+        private final Font font = FontFactory.getFont(FontFactory.HELVETICA, 7, TEXT_MUTED);
+        private PdfTemplate totalPages;
+        private BaseFont baseFont;
+
+        IssueFooter(String issuedAt) {
+            this.issuedAt = issuedAt;
+        }
+
+        @Override
+        public void onOpenDocument(PdfWriter writer, Document document) {
+            totalPages = writer.getDirectContent().createTemplate(30, 10);
+            try {
+                baseFont = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
+            } catch (Exception e) {
+                throw new ExceptionConverter(e);
+            }
+        }
+
+        @Override
+        public void onEndPage(PdfWriter writer, Document document) {
+            PdfContentByte cb = writer.getDirectContent();
+            float y = document.bottom() - 20;
+            ColumnText.showTextAligned(cb, Element.ALIGN_LEFT,
+                    new Phrase("Emitido pelo sistema em " + issuedAt, font), document.left(), y, 0);
+
+            String text = "Página " + writer.getPageNumber() + " de ";
+            float textWidth = baseFont.getWidthPoint(text, 7);
+            float x = document.right() - textWidth - 12;
+            cb.beginText();
+            cb.setFontAndSize(baseFont, 7);
+            cb.setColorFill(TEXT_MUTED);
+            cb.setTextMatrix(x, y);
+            cb.showText(text);
+            cb.endText();
+            cb.addTemplate(totalPages, x + textWidth, y);
+        }
+
+        @Override
+        public void onCloseDocument(PdfWriter writer, Document document) {
+            totalPages.beginText();
+            totalPages.setFontAndSize(baseFont, 7);
+            totalPages.setColorFill(TEXT_MUTED);
+            totalPages.setTextMatrix(0, 0);
+            totalPages.showText(String.valueOf(writer.getPageNumber() - 1));
+            totalPages.endText();
+        }
     }
 
     private void addSignatures(Document doc, String[] labels, Font font) throws Exception {

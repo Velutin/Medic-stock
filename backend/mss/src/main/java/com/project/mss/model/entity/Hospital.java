@@ -2,8 +2,10 @@ package com.project.mss.model.entity;
 
 import java.time.LocalDateTime;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Set;
 
+import com.project.mss.model.enums.HospitalType;
 import com.project.mss.model.enums.ProductLine;
 import com.project.mss.model.enums.PriceTableType;
 
@@ -30,6 +32,10 @@ public class Hospital {
     private String acronym;
 
     @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private HospitalType type = HospitalType.HOSPITAL;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "price_table_type", length = 20)
     private PriceTableType priceTableType;
 
@@ -44,6 +50,20 @@ public class Hospital {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    /** Hospitals supplied by this distribution center (empty for regular hospitals). */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "distribution_center_hospital",
+               joinColumns = @JoinColumn(name = "center_id"),
+               inverseJoinColumns = @JoinColumn(name = "hospital_id"))
+    private Set<Hospital> coveredHospitals = new HashSet<>();
+    /** Inverse side: the distribution center that supplies this hospital (at most one). Read-only. */
+    @ManyToMany(mappedBy = "coveredHospitals", fetch = FetchType.LAZY)
+    private Set<Hospital> distributionCenters = new HashSet<>();
+
+    public boolean isDistributionCenter() {
+        return type == HospitalType.DISTRIBUTION_CENTER;
+    }
 
     @PrePersist
     protected void onCreate() {

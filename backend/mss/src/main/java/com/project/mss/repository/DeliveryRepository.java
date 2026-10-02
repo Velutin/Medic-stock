@@ -8,4 +8,6 @@ import com.project.mss.model.entity.Delivery;
 
 public interface DeliveryRepository extends JpaRepository<Delivery, Long> {
     List<Delivery> findTop50ByHospitalIdOrderByCreatedAtDesc(Long hospitalId);
+
+    List<Delivery> findTop50BySourceHospitalIdOrderByCreatedAtDesc(Long sourceHospitalId);
 }

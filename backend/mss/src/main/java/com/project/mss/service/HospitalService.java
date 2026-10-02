@@ -7,6 +7,7 @@ import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.hospital.CoveredHospitalsDTO;
 import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.UserHospitalsDTO;
@@ -14,6 +15,7 @@ import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.User;
+import com.project.mss.model.enums.HospitalType;
 import com.project.mss.repository.HospitalRepository;
 import com.project.mss.repository.UserRepository;
 
@@ -51,6 +53,7 @@ public class HospitalService {
             throw new BusinessRuleException("A hospital already exists with the name " + dto.name());
         }
         Hospital h = new Hospital();
+        h.setType(dto.type() == null ? HospitalType.HOSPITAL : dto.type());
         apply(h, dto);
         return HospitalDTO.of(hospitalRepository.save(h));
     }
@@ -75,6 +78,36 @@ public class HospitalService {
         user.getHospitals().clear();
         user.getHospitals().addAll(hospitals);
         userRepository.save(user);
+    }
+
+    /**
+     * Sets the hospitals supplied by a distribution center. A hospital can belong to only one center
+     * and must be a regular hospital.
+     */
+    @Transactional
+    public HospitalDTO setCoveredHospitals(Long centerId, CoveredHospitalsDTO dto) {
+        accessControlService.requireManager();
+        Hospital center = findEntity(centerId);
+        if (!center.isDistributionCenter()) {
+            throw new BusinessRuleException(center.getName() + " is not a distribution center");
+        }
+        var hospitals = new HashSet<>(hospitalRepository.findAllById(dto.hospitalIds()));
+        if (hospitals.size() != dto.hospitalIds().size()) {
+            throw new EntityNotFoundException("One or more hospitals do not exist");
+        }
+        for (Hospital h : hospitals) {
+            if (h.isDistributionCenter()) {
+                throw new BusinessRuleException(h.getName() + " is a distribution center and cannot be supplied by another one");
+            }
+            hospitalRepository.findCenterOf(h.getId())
+                    .filter(other -> !other.getId().equals(centerId))
+                    .ifPresent(other -> {
+                        throw new BusinessRuleException(h.getName() + " is already supplied by " + other.getName());
+                    });
+        }
+        center.getCoveredHospitals().clear();
+        center.getCoveredHospitals().addAll(hospitals);
+        return HospitalDTO.of(hospitalRepository.save(center));
     }
 
     public Hospital findEntity(Long id) {

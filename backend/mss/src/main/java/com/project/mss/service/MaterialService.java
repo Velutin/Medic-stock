@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -23,6 +25,7 @@ import com.project.mss.model.entity.HospitalPrice;
 import com.project.mss.repository.LotRepository;
 import com.project.mss.repository.MaterialRepository;
 import com.project.mss.repository.HospitalPriceRepository;
+import com.project.mss.repository.HospitalRepository;
 
 @Service
 public class MaterialService {
@@ -30,13 +33,16 @@ public class MaterialService {
     private final MaterialRepository materialRepository;
     private final LotRepository lotRepository;
     private final HospitalPriceRepository hospitalPriceRepository;
+    private final HospitalRepository hospitalRepository;
     private final AccessControlService accessControlService;
 
     public MaterialService(MaterialRepository materialRepository, LotRepository lotRepository,
-                           HospitalPriceRepository hospitalPriceRepository, AccessControlService accessControlService) {
+                           HospitalPriceRepository hospitalPriceRepository, HospitalRepository hospitalRepository,
+                           AccessControlService accessControlService) {
         this.materialRepository = materialRepository;
         this.lotRepository = lotRepository;
         this.hospitalPriceRepository = hospitalPriceRepository;
+        this.hospitalRepository = hospitalRepository;
         this.accessControlService = accessControlService;
     }
 
@@ -91,8 +97,8 @@ public class MaterialService {
     // ------------------------------------------------------------------- lots
 
     /**
-     * Returns the lot, creating it when needed. The expiry date is mandatory and must match
-     * the registered one: a different date usually means a typo or a mislabeled item.
+     * Returns the lot identified by material + number + expiry date, creating it when needed.
+     * The same number with another expiry date is a different lot (units sterilized on different days).
      * Validation errors do not mark the caller's transaction for rollback, so a spreadsheet
      * import can report the row and continue.
      */
@@ -102,14 +108,9 @@ public class MaterialService {
             throw new BusinessRuleException("Expiry date is required for lot " + number + " (REF " + material.getRef() + ")");
         }
         String n = number.trim().toUpperCase();
-        Optional<Lot> existing = lotRepository.findByMaterialIdAndNumberIgnoreCase(material.getId(), n);
+        Optional<Lot> existing = lotRepository.findByMaterialIdAndNumberIgnoreCaseAndExpiryDate(material.getId(), n, expiryDate);
         if (existing.isPresent()) {
-            Lot l = existing.get();
-            if (!l.getExpiryDate().equals(expiryDate)) {
-                throw new BusinessRuleException("Lot " + n + " (REF " + material.getRef() + ") is registered with expiry date "
-                        + l.getExpiryDate() + ", not " + expiryDate);
-            }
-            return l;
+            return existing.get();
         }
         Lot l = new Lot();
         l.setMaterial(material);
@@ -130,9 +131,15 @@ public class MaterialService {
 
     // ------------------------------------------------------------------ prices
 
-    /** Material value in the hospital price table (SIGTAP or tender). */
+    /**
+     * Material value in the hospital price table (SIGTAP or tender). Hospitals supplied by a
+     * distribution center without their own value use the center's table.
+     */
     public Optional<BigDecimal> hospitalValue(Long hospitalId, Long materialId) {
-        return hospitalPriceRepository.findByHospitalIdAndMaterialId(hospitalId, materialId).map(HospitalPrice::getValue);
+        return hospitalPriceRepository.findByHospitalIdAndMaterialId(hospitalId, materialId)
+                .or(() -> hospitalRepository.findCenterOf(hospitalId)
+                        .flatMap(center -> hospitalPriceRepository.findByHospitalIdAndMaterialId(center.getId(), materialId)))
+                .map(HospitalPrice::getValue);
     }
 
     @Transactional
@@ -151,12 +158,24 @@ public class MaterialService {
         hospitalPriceRepository.save(p);
     }
 
+    /**
+     * Effective price table of a hospital: its own values plus, for a hospital supplied by a
+     * distribution center, the center's values for the REFs it has no value of its own.
+     * Each line tells whose table it comes from. This is the same rule used at surgery withdrawal.
+     */
     @Transactional(readOnly = true)
     public List<PriceDTO> hospitalTable(Long hospitalId) {
         accessControlService.requireHospitalAccess(hospitalId);
-        return hospitalPriceRepository.listByHospital(hospitalId).stream().map(PriceDTO::of).toList();
+        Map<Long, PriceDTO> byMaterial = new LinkedHashMap<>();
+        hospitalPriceRepository.listByHospital(hospitalId)
+                .forEach(p -> byMaterial.put(p.getMaterial().getId(), PriceDTO.of(p)));
+        hospitalRepository.findCenterOf(hospitalId).ifPresent(center ->
+                hospitalPriceRepository.listByHospital(center.getId())
+                        .forEach(p -> byMaterial.putIfAbsent(p.getMaterial().getId(), PriceDTO.of(p))));
+        return byMaterial.values().stream()
+                .sorted(java.util.Comparator.comparing(PriceDTO::ref))
+                .toList();
     }
-
     // ----------------------------------------------------------------- helpers
 
     /**

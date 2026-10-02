@@ -1,6 +1,7 @@
 package com.project.mss.service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
 
@@ -11,8 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgeryDTO;
+import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgeryFormDTO;
 import com.project.mss.dto.surgery.SurgeryItemDTO;
 import com.project.mss.dto.surgery.SurgerySummaryDTO;
@@ -73,6 +74,9 @@ public class SurgeryService {
     @Transactional
     public SurgeryDTO create(SurgeryFormDTO dto) {
         Hospital hospital = accessControlService.requireHospitalAccess(dto.hospitalId());
+        if (hospital.isDistributionCenter()) {
+            throw new BusinessRuleException(hospital.getName() + " is a distribution center and cannot have surgeries");
+        }
         User current = accessControlService.currentUser();
 
         User surgicalTech = current;
@@ -158,7 +162,7 @@ public class SurgeryService {
             case OPEN -> throw new BusinessRuleException("A surgery cannot be reopened");
         };
     }
-    
+
     private SurgeryDTO complete(Long id) {
         Surgery c = loadOpen(id);
         if (c.getItems().isEmpty()) {
@@ -173,7 +177,10 @@ public class SurgeryService {
         return toDTO(surgeryRepository.save(c));
     }
 
-    /** Cancels the surgery, returns all items to the hospital stock and discards the pending issues. */
+    /**
+     * Cancels the surgery: returns all items to the hospital stock and discards the pending issues.
+     * Items and total are kept as a record of what had been recorded; reports ignore cancelled surgeries.
+     */
     private SurgeryDTO cancel(Long id, String reason) {
         Surgery c = load(id);
         if (c.getStatus() == SurgeryStatus.CANCELLED) {
@@ -182,14 +189,14 @@ public class SurgeryService {
         if (c.getStatus() == SurgeryStatus.COMPLETED) {
             accessControlService.requireManager();
         }
-        String notes = "Surgery cancellation" + (reason != null && !reason.isBlank() ? ": " + reason : "");
+        String movementNotes = "Surgery cancellation: " + reason;
         for (SurgeryItem item : c.getItems()) {
-            stockService.reverseSurgeryWithdrawal(item.getLot(), item.getQuantity(), c.getHospital(), c.getId(), notes);
+            stockService.reverseSurgeryWithdrawal(item.getLot(), item.getQuantity(), c.getHospital(), c.getId(), movementNotes);
         }
-        c.getItems().clear();
-        c.recalculateTotal();
         c.setStatus(SurgeryStatus.CANCELLED);
-        c.setNotes(notes);
+        c.setCancelledAt(LocalDateTime.now());
+        c.setCancelledBy(accessControlService.currentUser());
+        c.setCancellationReason(reason);
         pendingIssueRepository.findBySurgeryIdOrderByIdAsc(id).stream()
                 .filter(p -> p.getStatus() == PendingIssueStatus.OPEN)
                 .forEach(p -> {
@@ -255,7 +262,7 @@ public class SurgeryService {
     }
 
     private WithdrawalResultDTO recordScan(Surgery c, String code, String ref, ReadSource readSource, int qty) {
-        var scan = lotScanService.resolve(code, ref);
+        var scan = lotScanService.resolve(code, ref, c.getHospital());
 
         switch (scan.status()) {
             case NOT_FOUND -> {
@@ -296,7 +303,8 @@ public class SurgeryService {
         p = pendingIssueRepository.save(p);
         String warning = switch (reason) {
             case LOT_NOT_FOUND -> "Lot not found. Recorded as a pending issue for review.";
-            case AMBIGUOUS_LOT -> "More than one material has this lot number. Provide the REF or resolve the pending issue.";
+            case AMBIGUOUS_LOT -> "This lot number matches more than one material or expiry date with balance in the hospital. "
+                    + "Scan the GS1 code (with expiry date), provide the REF or resolve the pending issue.";
             case EXPIRED_LOT -> "Lot expired on the surgery date. Recorded as a pending issue.";
             case NO_HOSPITAL_BALANCE -> "Lot has no balance inside the hospital. Recorded as a pending issue.";
         };
