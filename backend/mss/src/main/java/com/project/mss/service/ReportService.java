@@ -91,7 +91,7 @@ public class ReportService {
                 String.valueOf(e.getId()),
                 e.getHospital().getName(),
                 fmt(e.getCreatedAt().toLocalDate()),
-                e.getCreatedBy() != null ? e.getCreatedBy().getUsername() : "-",
+                e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-",
                 rows, total, e.getNotes()));
     }
 
@@ -116,7 +116,7 @@ public class ReportService {
                 new String[]{"Entregue por", "Recebido por (" + e.getDestinationHospital().getName() + ")"}));
     }
 
-    /** Supplier order, to be sent via WhatsApp. */
+    /** Supplier order PDF. */
     @Transactional(readOnly = true)
     public byte[] orderPdf(Long orderId) {
         SupplierOrder p = supplierOrderService.load(orderId);
@@ -163,7 +163,7 @@ public class ReportService {
             List<Surgery> list = byWeek.getOrDefault(s, List.of());
             weeks.add(new WeeklySurgeriesDTO(s, s.plusDays(6), s.plusDays(6), list.size(),
                     count(list, c -> c.getHospital().getName()),
-                    count(list, c -> c.getSurgicalTech() != null ? c.getSurgicalTech().getUsername() : "(no surgical tech)")));
+                    count(list, c -> c.getSurgicalTech() != null ? c.getSurgicalTech().getName() : "(no surgical tech)")));
         }
         return weeks;
     }

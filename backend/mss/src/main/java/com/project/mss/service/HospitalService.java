@@ -10,31 +10,29 @@ import org.springframework.transaction.annotation.Transactional;
 import com.project.mss.dto.hospital.CoveredHospitalsDTO;
 import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
-import com.project.mss.dto.hospital.UserHospitalsDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Hospital;
-import com.project.mss.model.entity.User;
 import com.project.mss.model.enums.HospitalType;
 import com.project.mss.repository.HospitalRepository;
-import com.project.mss.repository.UserRepository;
 
 @Service
 public class HospitalService {
 
     private final HospitalRepository hospitalRepository;
-    private final UserRepository userRepository;
     private final AccessControlService accessControlService;
 
-    public HospitalService(HospitalRepository hospitalRepository, UserRepository userRepository,
-                           AccessControlService accessControlService) {
+    public HospitalService(HospitalRepository hospitalRepository, AccessControlService accessControlService) {
         this.hospitalRepository = hospitalRepository;
-        this.userRepository = userRepository;
         this.accessControlService = accessControlService;
     }
 
     @Transactional(readOnly = true)
-    public List<HospitalDTO> listVisible() {
+    public List<HospitalDTO> listVisible(boolean includeInactive) {
+        if (includeInactive) {
+            accessControlService.requireManager();
+            return hospitalRepository.findAllByOrderByNameAsc().stream().map(HospitalDTO::of).toList();
+        }
         var allowed = accessControlService.allowedHospitals();
         return hospitalRepository.findByActiveTrueOrderByNameAsc().stream()
                 .filter(h -> allowed.contains(h.getId()))
@@ -65,20 +63,6 @@ public class HospitalService {
         return HospitalDTO.of(hospitalRepository.save(h));
     }
 
-    @Transactional
-    public void setUserHospitals(UserHospitalsDTO dto) {
-        User user = (User) userRepository.findByUsername(dto.username());
-        if (user == null) {
-            throw new EntityNotFoundException("User " + dto.username() + " not found");
-        }
-        var hospitals = new HashSet<>(hospitalRepository.findAllById(dto.hospitalIds()));
-        if (hospitals.size() != dto.hospitalIds().size()) {
-            throw new EntityNotFoundException("One or more hospitals do not exist");
-        }
-        user.getHospitals().clear();
-        user.getHospitals().addAll(hospitals);
-        userRepository.save(user);
-    }
 
     /**
      * Sets the hospitals supplied by a distribution center. A hospital can belong to only one center

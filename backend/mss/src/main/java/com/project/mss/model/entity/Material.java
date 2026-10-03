@@ -35,6 +35,14 @@ public class Material {
     @Column(length = 100)
     private String component;
 
+    /** Product lines the material is used in (at least one; e.g. bone cement: hip, knee and shoulder). */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "material_product_line", joinColumns = @JoinColumn(name = "material_id"))
+    @Column(name = "product_line", length = 20)
+    @Enumerated(EnumType.STRING)
+    @org.hibernate.annotations.BatchSize(size = 100)
+    private java.util.Set<com.project.mss.model.enums.ProductLine> productLines = new java.util.HashSet<>();
+
     @Column(length = 30)
     private String size;
 

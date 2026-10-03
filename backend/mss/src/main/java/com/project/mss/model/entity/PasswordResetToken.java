@@ -8,6 +8,8 @@ import lombok.Setter;
 
 import java.time.LocalDateTime;
 
+import com.project.mss.model.enums.TokenPurpose;
+
 @Entity
 @Table(name = "password_reset_tokens")
 @Getter
@@ -33,6 +35,10 @@ public class PasswordResetToken {
     @Column(nullable = false)
     private Boolean used = false;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private TokenPurpose purpose = TokenPurpose.PASSWORD_RESET;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -44,4 +50,4 @@ public class PasswordResetToken {
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(expiryDate);
     }
-}
+}

@@ -11,6 +11,8 @@ import com.project.mss.model.entity.Hospital;
 
 public interface HospitalRepository extends JpaRepository<Hospital, Long> {
     List<Hospital> findByActiveTrueOrderByNameAsc();
+
+    List<Hospital> findAllByOrderByNameAsc();
     Optional<Hospital> findByAcronymIgnoreCase(String acronym);
     boolean existsByNameIgnoreCase(String name);
 

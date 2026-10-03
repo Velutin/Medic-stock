@@ -10,7 +10,7 @@ import com.project.mss.dto.hospital.CoveredHospitalsDTO;
 import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.PriceDTO;
-import com.project.mss.dto.hospital.UserHospitalsDTO;
+import com.project.mss.dto.hospital.PriceFormDTO;
 import com.project.mss.dto.replenishment.ReplenishmentSuggestionDTO;
 import com.project.mss.service.HospitalService;
 import com.project.mss.service.MaterialService;
@@ -37,9 +37,10 @@ public class HospitalController {
     }
 
     @GetMapping
-    @Operation(summary = "Hospitals visible to the logged-in user")
-    public List<HospitalDTO> list() {
-        return hospitalService.listVisible();
+    @Operation(summary = "Hospitals visible to the logged-in user",
+               description = "includeInactive=true (ADMIN) also lists inactive hospitals, for the registry screen.")
+    public List<HospitalDTO> list(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return hospitalService.listVisible(includeInactive);
     }
 
     @GetMapping("/{id}")
@@ -60,9 +61,18 @@ public class HospitalController {
     }
 
     @GetMapping("/{id}/prices")
-    @Operation(summary = "Hospital price table")
+    @Operation(summary = "Hospital price table (ADMIN)")
     public List<PriceDTO> prices(@PathVariable Long id) {
         return materialService.hospitalTable(id);
+    }
+
+    @PutMapping("/{id}/prices/{materialId}")
+    @Operation(summary = "Create or change the value of a REF in the hospital table (ADMIN)",
+               description = "Surgery items recorded without value for this REF receive it automatically; "
+                       + "items that already had a value keep it.")
+    public PriceDTO putPrice(@PathVariable Long id, @PathVariable Long materialId,
+                             @RequestBody @Valid PriceFormDTO dto) {
+        return materialService.putPrice(id, materialId, dto.value());
     }
 
     @GetMapping("/{id}/replenishment-suggestions")
@@ -80,10 +90,4 @@ public class HospitalController {
         return hospitalService.setCoveredHospitals(id, dto);
     }
 
-    @PutMapping("/users")
-    @Operation(summary = "Set which hospitals a user works at (ADMIN)")
-    public ResponseEntity<String> setUserHospitals(@RequestBody @Valid UserHospitalsDTO dto) {
-        hospitalService.setUserHospitals(dto);
-        return ResponseEntity.ok("User hospitals updated");
-    }
 }

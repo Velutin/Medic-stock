@@ -13,6 +13,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -24,6 +26,7 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.imports.ImportResultDTO;
@@ -33,6 +36,7 @@ import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.Material;
 import com.project.mss.model.enums.Location;
+import com.project.mss.model.enums.PriceImportMode;
 import com.project.mss.repository.MinimumStockRepository;
 import com.project.mss.repository.MaterialRepository;
 
@@ -74,7 +78,11 @@ public class ImportService {
 
     // ============================================================ catalog
 
-    /** Columns: REF, DESCRIÇÃO, [GTIN], [COMPONENTE], [TAMANHO], [COR]. */
+    /**
+     * Columns: REF, DESCRIÇÃO, LINHA, [GTIN], [COMPONENTE], [TAMANHO], [COR].
+     * LINHA accepts one or more lines separated by comma (e.g. "QUADRIL, JOELHO, OMBRO") and replaces
+     * the current lines; it may be empty only for materials that already have lines.
+     */
     @Transactional
     public ImportResultDTO materials(MultipartFile file) {
         accessControlService.requireManager();
@@ -95,6 +103,15 @@ public class ImportService {
                         .ifPresent(other -> { throw new IllegalArgumentException("GTIN " + gtin + " already belongs to REF " + other.getRef()); });
                 m.setGtin(gtin);
             }
+            String linesText = text(row, col.get("LINHA"));
+            if (!linesText.isBlank()) {
+                var lines = com.project.mss.model.enums.ProductLine.fromLabels(linesText);
+                m.getProductLines().clear();
+                m.getProductLines().addAll(lines);
+            }
+            if (m.getProductLines().isEmpty()) {
+                throw new IllegalArgumentException("LINHA is required (QUADRIL, JOELHO and/or OMBRO)");
+            }
             String comp = text(row, col.get("COMPONENTE"));
             if (!comp.isBlank()) m.setComponent(comp.trim());
             String size = text(row, col.get("TAMANHO"));
@@ -108,12 +125,18 @@ public class ImportService {
 
     // ============================================================ prices
 
-    /** Hospital table: REF in column A and value in column B. Rows without a numeric value are skipped. */
+    /**
+     * Hospital table: REF in column A and value in column B. Rows without a numeric value are skipped.
+     * UPDATE creates or changes only the REFs in the spreadsheet. REPLACE treats the spreadsheet as the
+     * complete table: values of REFs not in it are removed. REPLACE is all-or-nothing: if any row has an
+     * error, nothing is saved, so a partial spreadsheet never wipes valid values.
+     */
     @Transactional
-    public ImportResultDTO prices(Long hospitalId, MultipartFile file, boolean createNewRefs) {
+    public ImportResultDTO prices(Long hospitalId, MultipartFile file, PriceImportMode mode, boolean createNewRefs) {
         accessControlService.requireManager();
         Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         List<String> errors = new ArrayList<>();
+        Set<Long> imported = new HashSet<>();
         int read = 0, ok = 0, ignored = 0;
 
         try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
@@ -131,10 +154,22 @@ public class ImportService {
                 }
                 Material m = material.orElseGet(() -> materialService.getOrCreate(ref, null));
                 materialService.setPrice(hospital, m, value.setScale(2, RoundingMode.HALF_UP));
+                imported.add(m.getId());
                 ok++;
             }
         } catch (IOException e) {
             throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        if (mode == PriceImportMode.REPLACE) {
+            if (!errors.isEmpty()) {
+                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+                errors.add(0, "Complete table not applied: fix the rows below and import again");
+                return new ImportResultDTO(read, 0, read, errors);
+            }
+            if (imported.isEmpty()) {
+                throw new BusinessRuleException("The spreadsheet has no valid rows; the current table was kept");
+            }
+            materialService.removePricesExcept(hospital, imported);
         }
         return new ImportResultDTO(read, ok, ignored, errors);
     }
@@ -201,8 +236,10 @@ public class ImportService {
             BigDecimal ideal = number(row, col.get("IDEAL"));
             BigDecimal idealTotal = number(row, col.get("IDEALTOTAL"));
             if (ideal == null || idealTotal == null) throw new IllegalArgumentException("IDEAL and IDEAL TOTAL are required");
-            if (idealTotal.intValue() < ideal.intValue()) {
-                throw new IllegalArgumentException("IDEAL TOTAL is lower than the hospital IDEAL");
+            try {
+                MinimumStockService.validate(hospital, ideal.intValue(), idealTotal.intValue());
+            } catch (BusinessRuleException e) {
+                throw new IllegalArgumentException(e.getMessage());
             }
             Material m = materialRepository.findByRefIgnoreCase(ref)
                     .orElseThrow(() -> new IllegalArgumentException("REF " + ref + " is not registered"));
@@ -277,6 +314,7 @@ public class ImportService {
                 case "MATERIAL", "PRODUTO", "ITEM" -> "MATERIAL";
                 case "LOCAL", "LOCALIZACAO", "ONDE" -> "LOCAL";
                 case "GTIN", "EAN", "CODIGODEBARRAS", "CODIGOBARRAS" -> "GTIN";
+                case "LINHA", "LINHAS", "LINE", "LINES" -> "LINHA";
                 case "IDEAL", "IDEALHOSPITAL", "MINIMO", "MINIMOHOSPITAL" -> "IDEAL";
                 case "IDEALTOTAL", "TOTALIDEAL", "MINIMOTOTAL" -> "IDEALTOTAL";
                 default -> n;

@@ -1,6 +1,5 @@
 package com.project.mss.service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -8,18 +7,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.project.mss.dto.replenishment.SupplierOrderDTO;
 import com.project.mss.dto.replenishment.SupplierOrderFormDTO;
-import com.project.mss.dto.replenishment.SupplierOrderStatusUpdateDTO;
-import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Material;
 import com.project.mss.model.entity.SupplierOrder;
 import com.project.mss.model.entity.SupplierOrderItem;
-import com.project.mss.model.enums.OrderStatus;
 import com.project.mss.repository.MaterialRepository;
 import com.project.mss.repository.SupplierOrderRepository;
 
-/** Material orders to the supplier, sent as PDF via WhatsApp. */
+/** Material orders to the supplier, generated as PDF. */
 @Service
 public class SupplierOrderService {
 
@@ -56,23 +52,6 @@ public class SupplierOrderService {
         return SupplierOrderDTO.of(supplierOrderRepository.save(p));
     }
 
-    /** Applies a status transition requested through PATCH /supplier-orders/{id}. */
-    @Transactional
-    public SupplierOrderDTO updateStatus(Long id, SupplierOrderStatusUpdateDTO dto) {
-        accessControlService.requireManager();
-        SupplierOrder p = load(id);
-        switch (dto.status()) {
-            case SENT -> {
-                if (p.getStatus() == OrderStatus.SENT) {
-                    throw new BusinessRuleException("Order " + id + " was already sent");
-                }
-                p.setStatus(OrderStatus.SENT);
-                p.setSentAt(LocalDateTime.now());
-            }
-            case GENERATED -> throw new BusinessRuleException("A sent order cannot return to generated");
-        }
-        return SupplierOrderDTO.of(supplierOrderRepository.save(p));
-    }
 
     @Transactional(readOnly = true)
     public List<SupplierOrderDTO> listByHospital(Long hospitalId) {

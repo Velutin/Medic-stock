@@ -31,25 +31,25 @@ public class SecurityConfig {
                     // Public resources / docs
                     .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/error").permitAll()
 
-                    // Public authentication. User registration is restricted to administrators.
-                    .requestMatchers(HttpMethod.POST, "/auth/login", "/auth/logout", "/user/forgot-password", "/user/reset-password").permitAll()
-                    .requestMatchers(HttpMethod.POST, "/auth/register").hasAnyAuthority("ADMIN", "MASTER")
+                    // Public: login, logout, first access and password reset
+                    .requestMatchers(HttpMethod.POST, "/auth/session", "/auth/password-reset-requests", "/auth/password-resets").permitAll()
+                    .requestMatchers(HttpMethod.DELETE, "/auth/session").permitAll()
 
-                    // Any authenticated user can change their own password and read their profile
-                    .requestMatchers(HttpMethod.PATCH, "/user/change-password").authenticated()
-                    .requestMatchers(HttpMethod.GET, "/user/me", "/auth/session").authenticated()
+                    // Any authenticated user: own session, own data and own password
+                    .requestMatchers(HttpMethod.GET, "/auth/session", "/users/me").authenticated()
+                    .requestMatchers(HttpMethod.PUT, "/users/me/password").authenticated()
 
                     // Master data, imports, replenishment and management reports: administrators only
                     .requestMatchers(HttpMethod.POST, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PUT, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/imports/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers("/reports/**").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**", "/hospitals/*/prices/**").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/reports/**", "/billing/**", "/billing-rates/**", "/dashboard/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PATCH, "/pending-issues/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/stock/entry", "/stock/adjustment").hasAnyAuthority("ADMIN", "MASTER")
 
                     // User management and monitoring
-                    .requestMatchers("/user/**").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/users/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/monitoring/**").hasAnyAuthority("ADMIN", "MASTER")
 
                     // Operations: surgical techs and administrators only
@@ -64,8 +64,8 @@ public class SecurityConfig {
                     .anyRequest().hasAnyAuthority("ADMIN", "MASTER")
             )
             .exceptionHandling(ex -> ex
-                    .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Not authenticated"))
-                    .accessDeniedHandler((req, res, e) -> res.sendError(403, "Access denied")))
+                    .authenticationEntryPoint((req, res, e) -> writeError(res, 401, "Not authenticated"))
+                    .accessDeniedHandler((req, res, e) -> writeError(res, 403, "Access denied")))
             .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }       
@@ -80,4 +80,13 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+
+    /** Same JSON error format as the API exception handler. */
+    private static void writeError(jakarta.servlet.http.HttpServletResponse res, int status, String message)
+            throws java.io.IOException {
+        res.setStatus(status);
+        res.setContentType("application/json");
+        res.setCharacterEncoding("UTF-8");
+        res.getWriter().write("{\"status\":" + status + ",\"message\":\"" + message + "\"}");
+    }
 }

@@ -10,6 +10,7 @@ import java.util.List;
 public record MaterialStockDTO(
         Long materialId,
         String ref,
+        List<com.project.mss.model.enums.ProductLine> productLines,
         String component,
         String description,
         String size,

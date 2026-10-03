@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import com.project.mss.repository.UserRepository;
 
+/** Loads the user for Spring Security by e-mail (the login). */
 @Service
 public class AuthenticationService implements UserDetailsService {
 
@@ -17,11 +18,9 @@ public class AuthenticationService implements UserDetailsService {
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        UserDetails user = repository.findByUsername(username);
-        if (user == null) {
-            throw new UsernameNotFoundException("User not found");
-        }
-        return user;
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        String normalized = email == null ? "" : email.trim().toLowerCase();
+        return repository.findByEmail(normalized)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 }

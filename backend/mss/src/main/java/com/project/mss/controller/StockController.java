@@ -1,9 +1,9 @@
 package com.project.mss.controller;
 
+import org.springdoc.core.annotations.ParameterObject;
 import java.time.LocalDate;
 import java.util.List;
 
-import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -11,9 +11,11 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockAdjustmentDTO;
 import com.project.mss.dto.stock.StockEntryDTO;
+import com.project.mss.dto.stock.LotStockDTO;
+import com.project.mss.dto.stock.StockSummaryDTO;
+import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.stock.StockMovementDTO;
 import com.project.mss.service.StockService;
@@ -41,6 +43,24 @@ public class StockController {
     public List<StockRowDTO> view(@PathVariable Long hospitalId,
                                        @RequestParam(defaultValue = "false") boolean includeExpired) {
         return stockService.hospitalView(hospitalId, includeExpired);
+    }
+
+    @GetMapping("/summary")
+    @Operation(summary = "Stock summary of a hospital, without lots (surgical tech's view)",
+               description = "Per material: quantity inside the hospital (storeroom excluded), valid lots only, "
+                       + "with product lines for grouping.")
+    public List<StockSummaryDTO> summary(@RequestParam Long hospitalId) {
+        return stockService.hospitalSummary(hospitalId);
+    }
+
+    @GetMapping("/lots")
+    @Operation(summary = "Stock by lot and hospital (administrators and read-only users; not surgical techs)",
+               description = "Without hospitalId, searches every hospital the user can see (locates a lot anywhere). term matches lot "
+                       + "number, REF, name, description or GTIN. Sorted by REF, expiry date and hospital. Paginated.")
+    public Page<LotStockDTO> lots(@RequestParam(required = false) String term,
+                                  @RequestParam(required = false) Long hospitalId,
+                                  @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
+        return stockService.searchLots(term, hospitalId, pageable);
     }
 
     @GetMapping("/material")

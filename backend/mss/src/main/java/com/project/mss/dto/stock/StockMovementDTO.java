@@ -17,6 +17,6 @@ public record StockMovementDTO(Long id, MovementType type, String ref, String lo
                 m.getSourceHospital() != null ? m.getSourceHospital().getName() : null, m.getSourceLocation(),
                 m.getDestinationHospital() != null ? m.getDestinationHospital().getName() : null, m.getDestinationLocation(),
                 m.getSurgeryId(), m.getLoanId(), m.getDeliveryId(),
-                m.getUser() != null ? m.getUser().getUsername() : null, m.getNotes(), m.getCreatedAt());
+                m.getUser() != null ? m.getUser().getName() : null, m.getNotes(), m.getCreatedAt());
     }
 }

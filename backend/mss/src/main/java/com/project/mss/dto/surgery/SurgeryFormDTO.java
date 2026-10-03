@@ -13,6 +13,6 @@ public record SurgeryFormDTO(
         @NotBlank(message = "Patient name is required") @Size(max = 200) String patientName,
         @NotNull @PastOrPresent LocalDate surgeryDate,
         @Size(max = 200) String doctor,
-        String surgicalTechUsername,
+        Long surgicalTechId,          // optional; administrators may record a surgery for another surgical tech
         String notes
 ) { }

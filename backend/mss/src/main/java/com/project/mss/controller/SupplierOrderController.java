@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.replenishment.SupplierOrderDTO;
 import com.project.mss.dto.replenishment.SupplierOrderFormDTO;
-import com.project.mss.dto.replenishment.SupplierOrderStatusUpdateDTO;
 import com.project.mss.service.ReportService;
 import com.project.mss.service.SupplierOrderService;
 
@@ -18,7 +17,7 @@ import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/supplier-orders")
-@Tag(name = "Supplier orders", description = "Material orders to the supplier, sent as PDF via WhatsApp (ADMIN)")
+@Tag(name = "Supplier orders", description = "Material orders to the supplier, generated as PDF (ADMIN)")
 public class SupplierOrderController {
 
     private final SupplierOrderService supplierOrderService;
@@ -47,15 +46,9 @@ public class SupplierOrderController {
     }
 
     @GetMapping("/{id}/pdf")
-    @Operation(summary = "Order PDF to send via WhatsApp")
+    @Operation(summary = "Supplier order PDF")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
         return FileResponses.pdf(reportService.orderPdf(id), "order-" + id + ".pdf", false);
     }
 
-    @PatchMapping("/{id}")
-    @Operation(summary = "Change the supplier order status",
-               description = "Use SENT once the order PDF has been sent to the supplier.")
-    public SupplierOrderDTO updateStatus(@PathVariable Long id, @RequestBody @Valid SupplierOrderStatusUpdateDTO dto) {
-        return supplierOrderService.updateStatus(id, dto);
-    }
 }

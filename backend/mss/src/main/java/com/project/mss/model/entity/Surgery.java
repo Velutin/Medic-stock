@@ -64,6 +64,10 @@ public class Surgery {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
+    /** When the surgery was completed; defines the billing month. */
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;
 

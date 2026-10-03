@@ -80,14 +80,12 @@ public class SurgeryService {
         User current = accessControlService.currentUser();
 
         User surgicalTech = current;
-        if (dto.surgicalTechUsername() != null && !dto.surgicalTechUsername().isBlank()) {
-            if (!current.isManager() && !current.getUsername().equals(dto.surgicalTechUsername())) {
+        if (dto.surgicalTechId() != null && !dto.surgicalTechId().equals(current.getId())) {
+            if (!current.isManager()) {
                 throw new AccessDeniedException("Only administrators can record surgeries for another surgical tech");
             }
-            surgicalTech = (User) userRepository.findByUsername(dto.surgicalTechUsername());
-            if (surgicalTech == null) {
-                throw new EntityNotFoundException("Surgical tech " + dto.surgicalTechUsername() + " not found");
-            }
+            surgicalTech = userRepository.findById(dto.surgicalTechId())
+                    .orElseThrow(() -> new EntityNotFoundException("Surgical tech " + dto.surgicalTechId() + " not found"));
         }
 
         Surgery c = new Surgery();
@@ -114,7 +112,8 @@ public class SurgeryService {
         if (hospitals.isEmpty()) return Page.empty(pageable);
         LocalDate i = start != null ? start : LocalDate.now().minusDays(30);
         LocalDate f = end != null ? end : LocalDate.now();
-        return surgeryRepository.list(hospitals, i, f, pageable).map(SurgerySummaryDTO::of);
+        boolean showValues = accessControlService.canSeeValues();
+        return surgeryRepository.list(hospitals, i, f, pageable).map(c -> SurgerySummaryDTO.of(c, showValues));
     }
 
     // ============================================================ material withdrawal
@@ -122,14 +121,14 @@ public class SurgeryService {
     /** Records an item scanned by QR code, barcode or typed lot number. */
     @Transactional
     public WithdrawalResultDTO recordWithdrawal(Long surgeryId, WithdrawalItemDTO dto) {
-        Surgery c = loadOpen(surgeryId);
+        Surgery c = loadEditable(surgeryId);
         return recordScan(c, dto.code(), dto.ref(), dto.readSource(), dto.quantityOrOne());
     }
 
     /** Records labels extracted from the consumption sheet. Each label counts as 1 item. */
     @Transactional
     public List<WithdrawalResultDTO> recordSheet(Long surgeryId, SheetItemsDTO dto) {
-        Surgery c = loadOpen(surgeryId);
+        Surgery c = loadEditable(surgeryId);
         return dto.labels().stream()
                 .filter(e -> e.lot() != null && !e.lot().isBlank())
                 .map(e -> recordScan(c, e.lot(), e.ref(), ReadSource.CONSUMPTION_SHEET, 1))
@@ -138,7 +137,7 @@ public class SurgeryService {
 
     @Transactional
     public SurgeryDTO removeItem(Long surgeryId, Long itemId) {
-        Surgery c = loadOpen(surgeryId);
+        Surgery c = loadEditable(surgeryId);
         SurgeryItem item = c.getItems().stream().filter(i -> i.getId().equals(itemId)).findFirst()
                 .orElseThrow(() -> new EntityNotFoundException("Item " + itemId + " does not belong to the surgery"));
         stockService.reverseSurgeryWithdrawal(item.getLot(), item.getQuantity(), c.getHospital(), c.getId(),
@@ -168,12 +167,16 @@ public class SurgeryService {
         if (c.getItems().isEmpty()) {
             throw new BusinessRuleException("The surgery has no recorded items");
         }
+        if (c.getSheetFile() == null) {
+            throw new BusinessRuleException("Attach the consumption sheet (PDF or photos) before completing the surgery");
+        }
         long open = pendingIssueRepository.countBySurgeryIdAndStatus(id, PendingIssueStatus.OPEN);
         if (open > 0) {
             throw new BusinessRuleException("There are " + open + " open pending issue(s) in this surgery. "
                     + "Resolve or discard them before completing.");
         }
         c.setStatus(SurgeryStatus.COMPLETED);
+        c.setCompletedAt(LocalDateTime.now());
         return toDTO(surgeryRepository.save(c));
     }
 
@@ -228,9 +231,7 @@ public class SurgeryService {
     /** Records an already identified lot (used when resolving pending issues). */
     @Transactional
     public SurgeryItemDTO recordLot(Surgery c, Lot lot, int quantity, ReadSource readSource) {
-        if (c.getStatus() != SurgeryStatus.OPEN) {
-            throw new BusinessRuleException("Surgery " + c.getId() + " is not open");
-        }
+        requireEditable(c);
         stockService.recordSurgeryWithdrawal(lot, quantity, c.getHospital(), c.getId());
         SurgeryItem item = new SurgeryItem();
         item.setSurgery(c);
@@ -242,7 +243,7 @@ public class SurgeryService {
         c.getItems().add(item);
         c.recalculateTotal();
         surgeryRepository.saveAndFlush(c);
-        return SurgeryItemDTO.of(item);
+        return SurgeryItemDTO.of(item, accessControlService.canSeeValues());
     }
 
     public Surgery load(Long id) {
@@ -250,6 +251,29 @@ public class SurgeryService {
                 .orElseThrow(() -> new EntityNotFoundException("Surgery " + id + " not found"));
         accessControlService.requireHospitalAccess(c.getHospital().getId());
         return c;
+    }
+
+    /**
+     * Items can be added or removed while the surgery is open and, by administrators, at any time
+     * after it was completed (corrections). Cancelled surgeries are never changed.
+     */
+    private Surgery loadEditable(Long id) {
+        Surgery c = load(id);
+        requireEditable(c);
+        return c;
+    }
+
+    private void requireEditable(Surgery c) {
+        switch (c.getStatus()) {
+            case OPEN -> { }
+            case COMPLETED -> {
+                if (!accessControlService.canSeeValues()) {
+                    throw new BusinessRuleException("Surgery " + c.getId()
+                            + " is completed: only administrators can change its items");
+                }
+            }
+            case CANCELLED -> throw new BusinessRuleException("Surgery " + c.getId() + " is cancelled and cannot be changed");
+        }
     }
 
     private Surgery loadOpen(Long id) {
@@ -284,8 +308,9 @@ public class SurgeryService {
         }
 
         SurgeryItemDTO item = recordLot(c, lot, qty, readSource);
-        String warning = item.unitValue() == null
+        String warning = Boolean.TRUE.equals(item.missingPrice())
                 ? "REF " + item.ref() + " has no value in the price table of " + c.getHospital().getName()
+                        + ". The value is filled in automatically when it is registered."
                 : null;
         return new WithdrawalResultDTO(true, item, null, warning);
     }
@@ -314,7 +339,7 @@ public class SurgeryService {
     private SurgeryDTO toDTO(Surgery c) {
         List<PendingIssueDTO> pendingIssues = c.getId() == null ? List.of()
                 : pendingIssueRepository.findBySurgeryIdOrderByIdAsc(c.getId()).stream().map(PendingIssueDTO::of).toList();
-        return SurgeryDTO.of(c, pendingIssues);
+        return SurgeryDTO.of(c, pendingIssues, accessControlService.canSeeValues());
     }
 
 }

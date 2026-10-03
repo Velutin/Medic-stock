@@ -2,10 +2,10 @@ package com.project.mss.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.List;
-import java.util.Optional;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +26,7 @@ import com.project.mss.repository.LotRepository;
 import com.project.mss.repository.MaterialRepository;
 import com.project.mss.repository.HospitalPriceRepository;
 import com.project.mss.repository.HospitalRepository;
+import com.project.mss.repository.SurgeryItemRepository;
 
 @Service
 public class MaterialService {
@@ -34,15 +35,17 @@ public class MaterialService {
     private final LotRepository lotRepository;
     private final HospitalPriceRepository hospitalPriceRepository;
     private final HospitalRepository hospitalRepository;
+    private final SurgeryItemRepository surgeryItemRepository;
     private final AccessControlService accessControlService;
 
     public MaterialService(MaterialRepository materialRepository, LotRepository lotRepository,
                            HospitalPriceRepository hospitalPriceRepository, HospitalRepository hospitalRepository,
-                           AccessControlService accessControlService) {
+                           SurgeryItemRepository surgeryItemRepository, AccessControlService accessControlService) {
         this.materialRepository = materialRepository;
         this.lotRepository = lotRepository;
         this.hospitalPriceRepository = hospitalPriceRepository;
         this.hospitalRepository = hospitalRepository;
+        this.surgeryItemRepository = surgeryItemRepository;
         this.accessControlService = accessControlService;
     }
 
@@ -121,6 +124,7 @@ public class MaterialService {
 
     @Transactional(readOnly = true)
     public List<LotDTO> findLots(String number) {
+        accessControlService.requireLotAccess();
         return lotRepository.findByNumber(number.trim()).stream().map(LotDTO::of).toList();
     }
 
@@ -142,7 +146,12 @@ public class MaterialService {
                 .map(HospitalPrice::getValue);
     }
 
+    /** Full table replacement: removes the hospital values of the materials not in keepMaterialIds. */
     @Transactional
+    public int removePricesExcept(Hospital hospital, java.util.Collection<Long> keepMaterialIds) {
+        return hospitalPriceRepository.deleteByHospitalExcept(hospital.getId(), keepMaterialIds);
+    }
+
     public void setPrice(Hospital hospital, Material material, BigDecimal value) {
         if (value == null || value.signum() < 0) {
             throw new BusinessRuleException("Invalid value for REF " + material.getRef());
@@ -156,6 +165,40 @@ public class MaterialService {
                 });
         p.setValue(value);
         hospitalPriceRepository.save(p);
+        fillMissingPrices(hospital, material, value);
+    }
+
+    /** Sets one value of the hospital table (ADMIN). */
+    @Transactional
+    public PriceDTO putPrice(Long hospitalId, Long materialId, BigDecimal value) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
+        Material material = materialRepository.findById(materialId)
+                .orElseThrow(() -> new EntityNotFoundException("Material " + materialId + " not found"));
+        setPrice(hospital, material, value);
+        return PriceDTO.of(hospitalPriceRepository.findByHospitalIdAndMaterialId(hospitalId, materialId).orElseThrow());
+    }
+
+    /**
+     * Surgery items recorded while the REF had no value receive the new value, and their surgery total
+     * is recalculated. Items that already had a value are never changed (audit: past surgeries keep the
+     * value of the day). A value registered in a distribution center also fills the items of the hospitals
+     * it supplies that have no value of their own.
+     */
+    private void fillMissingPrices(Hospital hospital, Material material, BigDecimal value) {
+        java.util.Set<Long> hospitalIds = new java.util.HashSet<>();
+        hospitalIds.add(hospital.getId());
+        if (hospital.isDistributionCenter()) {
+            hospital.getCoveredHospitals().stream()
+                    .filter(h -> hospitalPriceRepository.findByHospitalIdAndMaterialId(h.getId(), material.getId()).isEmpty())
+                    .forEach(h -> hospitalIds.add(h.getId()));
+        }
+        var surgeries = new java.util.HashSet<com.project.mss.model.entity.Surgery>();
+        for (var item : surgeryItemRepository.listWithoutPrice(hospitalIds, material.getId())) {
+            item.setUnitValue(value);
+            surgeries.add(item.getSurgery());
+        }
+        surgeries.forEach(com.project.mss.model.entity.Surgery::recalculateTotal);
     }
 
     /**
@@ -165,6 +208,7 @@ public class MaterialService {
      */
     @Transactional(readOnly = true)
     public List<PriceDTO> hospitalTable(Long hospitalId) {
+        accessControlService.requireManager();
         accessControlService.requireHospitalAccess(hospitalId);
         Map<Long, PriceDTO> byMaterial = new LinkedHashMap<>();
         hospitalPriceRepository.listByHospital(hospitalId)
@@ -176,6 +220,7 @@ public class MaterialService {
                 .sorted(java.util.Comparator.comparing(PriceDTO::ref))
                 .toList();
     }
+
     // ----------------------------------------------------------------- helpers
 
     /**
@@ -214,6 +259,8 @@ public class MaterialService {
                     .ifPresent(other -> { throw new BusinessRuleException("GTIN " + gtin + " already belongs to REF " + other.getRef()); });
         }
         m.setGtin(gtin);
+        m.getProductLines().clear();
+        m.getProductLines().addAll(dto.productLines());
         m.setComponent(dto.component());
         m.setSize(dto.size());
         m.setColor(dto.color() == null || dto.color().isBlank() ? null : dto.color().toUpperCase());

@@ -27,7 +27,35 @@ cd backend/mss
 
 On Windows PowerShell use `.\mvnw.cmd` and run each command on its own line.
 
-Swagger: http://localhost:8085/swagger-ui.html — initial user `admin` / `admin123` (change it on first login).
+Swagger: http://localhost:8085/swagger-ui.html — initial user `admin@mss.local` / `admin123` (change it on first login and fill in CPF and mobile phone).
+
+## Users and sessions
+
+- Login by e-mail (`POST /auth/session`). The name is not unique; e-mail and CPF are.
+- CPF (valid and unique) and mobile phone (DDD + 9 digits) are required for every new or edited user.
+- New users have no password: they receive an e-mail link (valid for 48 hours, single use) to create it.
+  Administrators can resend it (`POST /users/{id}/invitation`).
+- Sessions: 30 minutes without use (renewed on every action, ended when the browser closes); with
+  "keep me signed in", 7 days counted from the login. Changing the password ends the sessions on other
+  devices; deactivating a user blocks access immediately.
+- API errors always use the format `{ "status", "message", "fields" }`.
+
+## Profiles and values
+
+- ADMIN/MASTER: everything. SURGICAL_TECH: surgeries of their hospitals and the stock summary without lots
+  (`GET /stock/summary`); never sees prices or surgery values. USER (read-only): lot-level stock of their hospitals.
+- Surgery items recorded while the REF had no value receive it automatically when the value is registered;
+  values already recorded never change (audit).
+- Administrators can add or remove items of completed surgeries; cancelled surgeries cannot be changed.
+
+## Billing
+
+- `GET /billing?months=2026-09&months=2026-10[&hospitalId=]` (+ `/billing/xlsx`, `/billing/pdf`): completed surgeries
+  by completion month. Commission = total x commission rate; share = commission x share rate.
+- `GET/PUT/DELETE /billing-rates/{yyyy-MM}`: rates valid from a month until the next one; only the current or
+  future months can be changed, so past billing never changes.
+- `GET /dashboard[?hospitalId=]`: stock indicators, closing week (Saturday to Friday), replenishment alerts and
+  latest movements.
 
 Production environment variables for `mss`: `DB_URL`, `DB_USER`, `DB_PASSWORD`, `JWT_SECRET`,
 `STORAGE_DIR`, `LOGO_PATH` and `COMPANY_NAME` (report header), `FRONTEND_URL`, `RABBITMQ_HOST`, `EUREKA_URL`.
@@ -69,10 +97,10 @@ Report logo: `backend/mss/branding/logo.png`. To change it, replace the file kee
 
 Suggested order, using the `/imports` endpoints (.xls or .xlsx):
 
-1. `POST /imports/materials` — catalog (REF, DESCRIÇÃO, GTIN, COMPONENTE, TAMANHO, COR).
-2. `POST /imports/hospital/{id}/prices` — each hospital's table (REF in column A, value in column B).
+1. `POST /imports/materials` — catalog (REF, DESCRIÇÃO, LINHA, GTIN, COMPONENTE, TAMANHO, COR). LINHA accepts several lines separated by comma.
+2. `POST /imports/hospital/{id}/prices?mode=REPLACE` — each hospital's complete table (REF in column A, value in column B); `mode=UPDATE` changes only the REFs in the spreadsheet.
 3. `POST /imports/hospital/{id}/stock?mode=REPLACE` — current balance (REF, LOTE, VALIDADE, QUANTIDADE, LOCAL).
 4. `POST /imports/hospital/{id}/minimums` — REF, IDEAL, IDEAL TOTAL.
-5. `PUT /hospitals/users` — assign each surgical tech to their hospitals.
+5. `PUT /users/{id}/hospitals` — assign each surgical tech to their hospitals.
 
 Each import returns the rows with errors for correction and reload.

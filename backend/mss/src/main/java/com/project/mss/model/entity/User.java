@@ -8,6 +8,7 @@ import java.util.List;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -34,11 +35,28 @@ public class User implements UserDetails {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** Login and unique identifier (always stored in lower case). */
+    @Column(nullable = false, unique = true)
     private String email;
 
-    private String username;
+    /** Full name; not unique. */
+    @Column(nullable = false)
+    private String name;
 
+    /** CPF digits (11), unique. */
+    @Column(unique = true, length = 11)
+    private String cpf;
+
+    /** Mobile phone digits: DDD + 9 digits. */
+    @Column(length = 11)
+    private String phone;
+
+    /** Null until the user opens the first-access link and creates a password. */
     private String password;
+
+    /** Sessions issued before this instant are rejected (set on password change). */
+    @Column(name = "sessions_valid_after")
+    private LocalDateTime sessionsValidAfter;
 
     private Boolean isActive = true;
 
@@ -65,11 +83,15 @@ public class User implements UserDetails {
     @lombok.ToString.Exclude
     private java.util.Set<Hospital> hospitals = new java.util.HashSet<>();
 
-    public User(String username, String email, String encodedPassword, Role role) {
-        this.username = username;
+    public User(String name, String email, Role role) {
+        this.name = name;
         this.email = email;
-        this.password = encodedPassword;
         roles.add(role);
+    }
+
+    /** Invited users cannot log in until they create a password through the first-access link. */
+    public boolean isPendingFirstAccess() {
+        return password == null;
     }
 
     @PrePersist
@@ -89,9 +111,10 @@ public class User implements UserDetails {
         }
     }
 
+    /** Spring Security login identifier: the e-mail. Use getName() for the person's name. */
     @Override
     public String getUsername() {
-        return this.username;
+        return this.email;
     }
 
     @Override
@@ -143,6 +166,6 @@ public class User implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return isActive;
+        return isActive && !isPendingFirstAccess();
     }
 }
