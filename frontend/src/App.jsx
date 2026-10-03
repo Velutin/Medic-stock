@@ -9,6 +9,8 @@ import SetPasswordPage from './pages/SetPasswordPage';
 import UsersPage from './pages/users/UsersPage';
 import StockPage from './pages/stock/StockPage';
 import RegistryPage from './pages/registry/RegistryPage';
+import EntryPage from './pages/entry/EntryPage';
+import TransferPage from './pages/transfer/TransferPage';
 import ComingSoon from './pages/ComingSoon';
 
 /** Screens already connected to the API; the other menu items show a placeholder until their phase. */
@@ -16,6 +18,8 @@ const PAGES = {
   '/usuarios': <UsersPage />,
   '/estoque': <StockPage />,
   '/cadastros': <RegistryPage />,
+  '/entrada': <EntryPage />,
+  '/transferencia': <TransferPage />,
 };
 
 function Home() {

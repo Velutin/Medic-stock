@@ -51,6 +51,9 @@ const EXACT = {
     'A tabela completa não foi aplicada: corrija as linhas abaixo e importe novamente.',
   'The spreadsheet has no valid rows; the current table was kept': 'A planilha não tem linhas válidas; a tabela atual foi mantida.',
   'Rates of past months cannot be changed (billing already calculated)': 'Os percentuais de meses passados não podem ser alterados.',
+  'Code not provided': 'Leia ou digite um código.',
+  'expired lot': 'lote vencido',
+  'The start date must be before the end date': 'A data inicial deve ser anterior à final.',
 };
 
 const PATTERNS = [
@@ -75,6 +78,18 @@ const PATTERNS = [
   [/^User (\d+) not found$/, () => 'Usuário não encontrado.'],
   [/^You do not have access to hospital (.+)$/, (m) => `Você não tem acesso ao hospital ${m[1]}.`],
   [/^Invalid or missing parameter/, () => 'Parâmetro inválido ou ausente.'],
+  [/^Lot (\S+) \(REF (.+)\) is expired and cannot be (received|delivered)$/,
+    (m) => `O lote ${m[1]} (REF ${m[2]}) está vencido e não pode ${m[3] === 'received' ? 'entrar no estoque' : 'ser transferido'}.`],
+  [/^Lot (\S+) is expired and cannot be delivered$/, (m) => `O lote ${m[1]} está vencido e não pode ser transferido.`],
+  [/^Lot (\S+) \(REF (.+)\) of entry #(\d+) already left the storeroom of (.+): available (\d+), the correction removes (\d+)$/,
+    (m) => `O lote ${m[1]} (REF ${m[2]}) da entrada #${m[3]} já saiu da sala de ${m[4]}: há ${m[5]} na sala e a correção retira ${m[6]}. `
+      + 'Corrija a transferência ou faça um ajuste de inventário antes.'],
+  [/^(.+) is supplied by (.+): register the entry at (.+)$/, (m) => `${m[1]} é atendido por ${m[2]}: registre a entrada em ${m[2]}.`],
+  [/^(.+) is inactive$/, (m) => `${m[1]} está inativo.`],
+  [/^(.+) is a distribution center: deliver to one of the hospitals it supplies$/,
+    (m) => `${m[1]} é um centro de distribuição: transfira para um dos hospitais atendidos.`],
+  [/^Stock entry (\d+) not found$/, () => 'Entrada não encontrada.'],
+  [/^Material (\d+) not found$/, () => 'Item não encontrado no catálogo.'],
 ];
 
 /** Field-level validation messages. */
@@ -88,6 +103,14 @@ const FIELDS = {
   'Password is required': 'Informe a senha.',
   'Current password is required': 'Informe a senha atual.',
   'Token is required': 'Link inválido.',
+  'Destination is required': 'Escolha o destino.',
+  'Entry date is required': 'Informe a data de recebimento.',
+  'The entry date cannot be in the future': 'A data de recebimento não pode ser futura.',
+  'Add at least one item': 'Adicione ao menos um item.',
+  'Material is required': 'Informe o item.',
+  'Lot is required': 'Informe o lote.',
+  'Expiry date is required': 'A validade é obrigatória.',
+  'Quantity must be greater than zero': 'A quantidade deve ser maior que zero.',
   'Password must have 8 to 20 characters, with at least one digit, one lowercase letter, one uppercase letter and one special character':
     'A senha deve ter de 8 a 20 caracteres, com número, letra minúscula, letra maiúscula e caractere especial.',
 };

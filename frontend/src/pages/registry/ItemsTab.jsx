@@ -20,7 +20,11 @@ import { tokens } from '../../theme';
 const EMPTY = { ref: '', description: '', productLines: [], component: '', size: '', color: '', gtin: '', active: true };
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 
-function ItemDialog({ open, item, onClose, onSaved }) {
+/**
+ * Create or edit a catalog item. Exported so other screens (e.g. the stock entry) can register a new REF on the spot.
+ * initial: pre-filled fields for a new item (e.g. { ref, gtin, description }); onSaved receives the saved item.
+ */
+export function ItemDialog({ open, item, initial, onClose, onSaved }) {
   const notify = useNotify();
   const fullScreen = useMediaQuery('(max-width:599.95px)');
   const [form, setForm] = useState(EMPTY);
@@ -33,7 +37,8 @@ function ItemDialog({ open, item, onClose, onSaved }) {
     setForm(item ? {
       ref: item.ref, description: item.description, productLines: item.productLines || [], component: item.component || '',
       size: item.size || '', color: item.color || '', gtin: item.gtin || '', active: item.active !== false,
-    } : EMPTY);
+    } : { ...EMPTY, ...initial });
+    // initial is only read when the dialog opens
   }, [open, item]);
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -57,10 +62,11 @@ function ItemDialog({ open, item, onClose, onSaved }) {
     };
     setSaving(true);
     try {
-      if (item) await api(`/materials/${item.id}`, { method: 'PUT', body });
-      else await api('/materials', { method: 'POST', body });
+      const saved = item
+        ? await api(`/materials/${item.id}`, { method: 'PUT', body })
+        : await api('/materials', { method: 'POST', body });
       notify.success(item ? 'Item atualizado.' : 'Item cadastrado.');
-      onSaved();
+      onSaved(saved);
     } catch (err) {
       setErrors(err.fields || {});
       notify.error(err);

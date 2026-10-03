@@ -14,8 +14,10 @@ import com.project.mss.dto.stock.LotBalanceDTO;
 import com.project.mss.dto.material.LotDTO;
 import com.project.mss.dto.material.MaterialDTO;
 import com.project.mss.dto.material.MaterialFormDTO;
+import com.project.mss.dto.material.ScannedCodeDTO;
 import com.project.mss.service.StockService;
 import com.project.mss.service.MaterialService;
+import com.project.mss.service.LotScanService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,10 +30,13 @@ public class MaterialController {
 
     private final MaterialService materialService;
     private final StockService stockService;
+    private final LotScanService lotScanService;
 
-    public MaterialController(MaterialService materialService, StockService stockService) {
+    public MaterialController(MaterialService materialService, StockService stockService,
+                              LotScanService lotScanService) {
         this.materialService = materialService;
         this.stockService = stockService;
+        this.lotScanService = lotScanService;
     }
 
     @GetMapping
@@ -51,6 +56,13 @@ public class MaterialController {
     @Operation(summary = "Atualizar material (ADMIN)")
     public MaterialDTO update(@PathVariable Long id, @RequestBody @Valid MaterialFormDTO dto) {
         return materialService.update(id, dto);
+    }
+
+    @GetMapping("/scan")
+    @Operation(summary = "What a scanned or typed code identifies (GTIN, REF, lot, expiry date), without requiring the lot to exist",
+               description = "Accepts GS1 QR codes/barcodes, a bare GTIN, labeled text (REF/LOTE) or a typed REF.")
+    public ScannedCodeDTO scan(@RequestParam String code) {
+        return lotScanService.read(code);
     }
 
     @GetMapping("/lots")

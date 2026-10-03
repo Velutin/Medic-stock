@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.project.mss.dto.entry.EntryPreviewRowDTO;
 import com.project.mss.dto.imports.ImportResultDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.MinimumStock;
@@ -221,6 +223,69 @@ public class ImportService {
             }
             return true;
         });
+    }
+
+    // ============================================================ stock entry (review before saving)
+
+    /**
+     * Reads a stock entry spreadsheet WITHOUT saving anything, so the rows can be reviewed on screen first.
+     * Columns: REF, LOTE, VALIDADE, QUANTIDADE, [DESCRIÇÃO], [GTIN].
+     * A REF that is not in the catalog comes back without materialId (it can be registered on screen);
+     * rows that cannot be used as they are (missing lot, invalid date or quantity, expired lot) come back with the error.
+     */
+    @Transactional(readOnly = true)
+    public List<EntryPreviewRowDTO> stockEntryPreview(MultipartFile file) {
+        accessControlService.requireManager();
+        String[] required = {"REF", "LOTE", "VALIDADE", "QUANTIDADE"};
+        LocalDate today = LocalDate.now();
+        List<EntryPreviewRowDTO> rows = new ArrayList<>();
+        try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
+            Sheet sh = wb.getSheetAt(0);
+            Map<String, Integer> col = null;
+            for (Row row : sh) {
+                if (col == null) {
+                    Map<String, Integer> c = mapHeader(row);
+                    if (c.keySet().containsAll(List.of(required))) col = c;
+                    continue;
+                }
+                String ref = text(row, col.get("REF")).trim().toUpperCase();
+                String lot = text(row, col.get("LOTE")).trim().toUpperCase();
+                if (ref.isBlank() && lot.isBlank()) continue;
+
+                String description = text(row, col.getOrDefault("DESCRICAO", col.get("MATERIAL")));
+                String gtin = MaterialService.normalizeGtin(text(row, col.get("GTIN")));
+                Long materialId = null;
+                LocalDate expiryDate = null;
+                Integer quantity = null;
+                String error = null;
+                try {
+                    if (ref.isBlank() || lot.isBlank()) throw new IllegalArgumentException("REF and lot are required");
+                    Optional<Material> material = materialRepository.findByRefIgnoreCase(ref);
+                    if (material.isPresent()) {
+                        materialId = material.get().getId();
+                        description = material.get().getDescription();
+                    }
+                    expiryDate = date(row, col.get("VALIDADE"));
+                    if (expiryDate == null) throw new IllegalArgumentException("expiry date is required");
+                    BigDecimal qty = number(row, col.get("QUANTIDADE"));
+                    if (qty == null || qty.signum() <= 0 || qty.stripTrailingZeros().scale() > 0) {
+                        throw new IllegalArgumentException("invalid quantity");
+                    }
+                    quantity = qty.intValue();
+                    if (expiryDate.isBefore(today)) throw new IllegalArgumentException("expired lot");
+                } catch (IllegalArgumentException e) {
+                    error = e.getMessage();
+                }
+                rows.add(new EntryPreviewRowDTO(row.getRowNum() + 1, ref, materialId, description, gtin, lot,
+                        expiryDate, quantity, error));
+            }
+            if (col == null) {
+                throw new BusinessRuleException("Header not found. Required columns: " + String.join(", ", required));
+            }
+        } catch (IOException e) {
+            throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        return rows;
     }
 
     // ============================================================ minimums

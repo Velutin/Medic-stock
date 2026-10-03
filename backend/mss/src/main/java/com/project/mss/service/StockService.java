@@ -131,6 +131,47 @@ public class StockService {
         return stockMovementRepository.save(m);
     }
 
+    /**
+     * Material received from the supplier (stock entry): enters the storeroom assigned to the hospital.
+     * The movement carries the receipt date informed in the entry.
+     */
+    @Transactional
+    public StockMovement recordStockEntry(Lot lot, int quantity, Hospital hospital, Long stockEntryId,
+                                          LocalDateTime date) {
+        credit(lot, hospital, Location.STOREROOM, quantity);
+        StockMovement m = newMovement(MovementType.ENTRY, lot, quantity);
+        m.setDestinationHospital(hospital);
+        m.setDestinationLocation(Location.STOREROOM);
+        m.setStockEntryId(stockEntryId);
+        m.setCreatedAt(date);
+        m.setNotes("Stock entry #" + stockEntryId);
+        return stockMovementRepository.save(m);
+    }
+
+    /**
+     * Correction of a stock entry already recorded: difference > 0 adds to the storeroom, < 0 removes from it.
+     * Recorded as ENTRY_CORRECTION with the signed difference, linked to the entry.
+     */
+    @Transactional
+    public StockMovement correctStockEntry(Lot lot, int difference, Hospital hospital, Long stockEntryId) {
+        if (difference < 0) {
+            debit(lot, hospital, Location.STOREROOM, -difference);
+        } else {
+            credit(lot, hospital, Location.STOREROOM, difference);
+        }
+        StockMovement m = newMovement(MovementType.ENTRY_CORRECTION, lot, difference);
+        if (difference > 0) {
+            m.setDestinationHospital(hospital);
+            m.setDestinationLocation(Location.STOREROOM);
+        } else {
+            m.setSourceHospital(hospital);
+            m.setSourceLocation(Location.STOREROOM);
+        }
+        m.setStockEntryId(stockEntryId);
+        m.setNotes("Correction of stock entry #" + stockEntryId);
+        return stockMovementRepository.save(m);
+    }
+
     /** Sets the absolute balance (inventory). Records the difference as INVENTORY_ADJUSTMENT. */
     @Transactional
     public void adjustBalance(Lot lot, Hospital hospital, Location location, int countedQuantity,

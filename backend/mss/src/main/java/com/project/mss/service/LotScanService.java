@@ -12,6 +12,8 @@ import java.util.regex.Pattern;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.material.MaterialDTO;
+import com.project.mss.dto.material.ScannedCodeDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
@@ -122,6 +124,49 @@ public class LotScanService {
             materialService.assignGtinIfMissing(result.lot().getMaterial(), gtin);
         }
         return result;
+    }
+
+    /**
+     * Reads a scanned or typed code without requiring the lot to be registered (stock entries and deliveries).
+     *  - GS1 (QR code or barcode): GTIN (01), lot (10) and expiry date (17);
+     *  - bare GTIN (EAN barcode without lot): the material only;
+     *  - labeled text ("REF: ... LOTE: ...");
+     *  - plain text: a REF when it is registered; otherwise nothing is identified and the caller decides
+     *    (e.g. the delivery screen treats it as a typed lot number).
+     */
+    @Transactional(readOnly = true)
+    public ScannedCodeDTO read(String scannedCode) {
+        String code = scannedCode == null ? "" : scannedCode.trim();
+        if (code.isEmpty()) throw new BusinessRuleException("Code not provided");
+
+        Map<String, String> gs1 = parseGs1(code);
+        String gtin = MaterialService.normalizeGtin(gs1.get("01"));
+        String lot = gs1.get("10");
+        LocalDate expiryDate = parseExpiry(gs1.get("17"));
+        String ref = null;
+
+        if (gs1.isEmpty()) {
+            if (code.matches("\\d{8}|\\d{12,14}")) {
+                gtin = MaterialService.normalizeGtin(code);
+            }
+            Matcher ml = LOT_LABEL.matcher(code);
+            if (ml.find()) lot = ml.group(1);
+            Matcher mr = REF_LABEL.matcher(code);
+            if (mr.find()) ref = mr.group(1).toUpperCase();
+        }
+
+        Optional<Material> material = gtin == null ? Optional.empty() : materialRepository.findByGtin(gtin);
+        if (material.isEmpty() && ref != null) {
+            material = materialRepository.findByRefIgnoreCase(ref);
+        }
+        if (material.isEmpty() && gs1.isEmpty() && lot == null && ref == null) {
+            // Plain text (or digits that are not a known GTIN): a typed REF
+            material = materialRepository.findByRefIgnoreCase(code.toUpperCase());
+        }
+        if (material.isPresent()) ref = material.get().getRef();
+
+        return new ScannedCodeDTO(code, gtin, ref, lot == null || lot.isBlank() ? null : lot.trim().toUpperCase(),
+                expiryDate, material.map(MaterialDTO::of).orElse(null));
     }
 
     /**

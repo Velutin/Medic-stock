@@ -58,6 +58,10 @@ public class StockMovement {
     @Column(name = "delivery_id")
     private Long deliveryId;
 
+    /** Stock entry that created (or corrected) this movement. */
+    @Column(name = "stock_entry_id")
+    private Long stockEntryId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;
@@ -70,6 +74,7 @@ public class StockMovement {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        // A stock entry informs the receipt date; every other movement happens now
+        if (createdAt == null) createdAt = LocalDateTime.now();
     }
 }
