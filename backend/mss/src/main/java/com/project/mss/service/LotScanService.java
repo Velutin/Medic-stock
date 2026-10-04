@@ -178,7 +178,11 @@ public class LotScanService {
     private Result choose(List<Lot> candidates, LocalDate expiryDate, Hospital hospital, String lotNumber, String ref) {
         List<Lot> list = candidates;
         if (expiryDate != null) {
-            list = list.stream().filter(l -> l.getExpiryDate().equals(expiryDate)).toList();
+            List<Lot> exact = list.stream().filter(l -> l.getExpiryDate().equals(expiryDate)).toList();
+            // Lots typed as MM/AAAA are stored on day 1: the label's full date still matches by month
+            YearMonth month = YearMonth.from(expiryDate);
+            list = !exact.isEmpty() ? exact
+                    : list.stream().filter(l -> YearMonth.from(l.getExpiryDate()).equals(month)).toList();
         }
         if (list.size() > 1 && hospital != null) {
             List<Lot> withBalance = list.stream()

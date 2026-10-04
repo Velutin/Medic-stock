@@ -2,7 +2,10 @@ package com.project.mss.service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.springframework.data.domain.Page;
@@ -18,6 +21,7 @@ import com.project.mss.dto.surgery.SurgeryFormDTO;
 import com.project.mss.dto.surgery.SurgeryItemDTO;
 import com.project.mss.dto.surgery.SurgerySummaryDTO;
 import com.project.mss.dto.surgery.SheetItemsDTO;
+import com.project.mss.dto.surgery.SheetLabelPreviewDTO;
 import com.project.mss.dto.surgery.PendingIssueDTO;
 import com.project.mss.dto.surgery.WithdrawalResultDTO;
 import com.project.mss.dto.surgery.WithdrawalItemDTO;
@@ -27,6 +31,7 @@ import com.project.mss.model.entity.Surgery;
 import com.project.mss.model.entity.SurgeryItem;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
+import com.project.mss.model.entity.Material;
 import com.project.mss.model.entity.PendingIssue;
 import com.project.mss.model.entity.User;
 import com.project.mss.model.enums.Location;
@@ -37,6 +42,8 @@ import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.repository.SurgeryRepository;
 import com.project.mss.repository.PendingIssueRepository;
 import com.project.mss.repository.UserRepository;
+import com.project.mss.repository.LotRepository;
+import com.project.mss.repository.MaterialRepository;
 
 /**
  * Material withdrawal in surgeries. Material leaves the stock INSIDE the surgery hospital
@@ -54,11 +61,14 @@ public class SurgeryService {
     private final LotScanService lotScanService;
     private final FileStorageService fileStorageService;
     private final AccessControlService accessControlService;
+    private final LotRepository lotRepository;
+    private final MaterialRepository materialRepository;
 
     public SurgeryService(SurgeryRepository surgeryRepository, PendingIssueRepository pendingIssueRepository,
                            UserRepository userRepository, StockService stockService,
                            MaterialService materialService, LotScanService lotScanService,
-                           FileStorageService fileStorageService, AccessControlService accessControlService) {
+                           FileStorageService fileStorageService, AccessControlService accessControlService,
+                           LotRepository lotRepository, MaterialRepository materialRepository) {
         this.surgeryRepository = surgeryRepository;
         this.pendingIssueRepository = pendingIssueRepository;
         this.userRepository = userRepository;
@@ -67,6 +77,8 @@ public class SurgeryService {
         this.lotScanService = lotScanService;
         this.fileStorageService = fileStorageService;
         this.accessControlService = accessControlService;
+        this.lotRepository = lotRepository;
+        this.materialRepository = materialRepository;
     }
 
     // ============================================================ cadastro
@@ -130,9 +142,108 @@ public class SurgeryService {
     public List<WithdrawalResultDTO> recordSheet(Long surgeryId, SheetItemsDTO dto) {
         Surgery c = loadEditable(surgeryId);
         return dto.labels().stream()
-                .filter(e -> e.lot() != null && !e.lot().isBlank())
-                .map(e -> recordScan(c, e.lot(), e.ref(), ReadSource.CONSUMPTION_SHEET, 1))
+                .filter(l -> l.lotId() != null || notBlank(l.lot()) || notBlank(l.code()))
+                .map(l -> {
+                    if (l.lotId() != null) {
+                        Lot lot = lotRepository.findById(l.lotId())
+                                .orElseThrow(() -> new EntityNotFoundException("Lot " + l.lotId() + " not found"));
+                        return recordResolved(c, lot, lot.getNumber(), ReadSource.CONSUMPTION_SHEET, 1);
+                    }
+                    String code = notBlank(l.code()) ? l.code() : l.lot();
+                    return applyResolution(c, resolveSheetLabel(l, c.getHospital()), code, ReadSource.CONSUMPTION_SHEET, 1);
+                })
                 .toList();
+    }
+
+    /**
+     * What each sheet label will become, without recording anything. Labels of the same lot are counted
+     * together against the hospital balance (each label = 1 item).
+     */
+    @Transactional
+    public List<SheetLabelPreviewDTO> previewSheet(Long surgeryId, SheetItemsDTO dto) {
+        Surgery c = loadEditable(surgeryId);
+        Hospital h = c.getHospital();
+        Map<Long, Integer> used = new HashMap<>();
+        List<SheetLabelPreviewDTO> out = new ArrayList<>();
+        for (int i = 0; i < dto.labels().size(); i++) {
+            SheetItemsDTO.LabelDTO l = dto.labels().get(i);
+            if (l.lotId() == null && !notBlank(l.lot()) && !notBlank(l.code())) {
+                // Only the GTIN was read: the lot must be chosen or typed
+                Material m = notBlank(l.gtin())
+                        ? materialRepository.findByGtin(MaterialService.normalizeGtin(l.gtin())).orElse(null) : null;
+                out.add(preview(i, "NO_LOT", null, m, null, c));
+                continue;
+            }
+            LotScanService.Result r;
+            if (l.lotId() != null) {
+                r = lotRepository.findById(l.lotId()).map(LotScanService.Result::found)
+                        .orElse(new LotScanService.Result(LotScanService.Status.NOT_FOUND, null, List.of(), null, null));
+            } else {
+                try {
+                    r = resolveSheetLabel(l, h);
+                } catch (BusinessRuleException e) {
+                    out.add(preview(i, "NOT_FOUND", null, null, null, c));
+                    continue;
+                }
+            }
+            if (r.status() != LotScanService.Status.FOUND) {
+                // Material for the options: the single material of the candidates, or the one of the GTIN read
+                List<Material> materials = r.candidates().stream().map(Lot::getMaterial)
+                        .filter(distinctById()).toList();
+                Material m = materials.size() == 1 ? materials.get(0)
+                        : materials.isEmpty() && notBlank(l.gtin())
+                                ? materialRepository.findByGtin(MaterialService.normalizeGtin(l.gtin())).orElse(null)
+                                : null;
+                out.add(preview(i, r.status().name(), null, m, null, c));
+                continue;
+            }
+            Lot lot = r.lot();
+            String status;
+            if (lot.isExpired(c.getSurgeryDate())) {
+                status = "EXPIRED";
+            } else {
+                int count = used.merge(lot.getId(), 1, Integer::sum);
+                status = stockService.balance(lot, h, Location.HOSPITAL) >= count ? "OK" : "NO_BALANCE";
+            }
+            out.add(preview(i, status, lot, lot.getMaterial(), lot, c));
+        }
+        return out;
+    }
+
+    private SheetLabelPreviewDTO preview(int index, String status, Lot lot, Material m, Lot shown, Surgery c) {
+        List<SheetLabelPreviewDTO.LotOption> options = m == null || "OK".equals(status) ? List.of()
+                : stockService.lotsInsideHospital(c.getHospital(), m.getId(), c.getSurgeryDate()).stream()
+                        .map(s -> new SheetLabelPreviewDTO.LotOption(s.getLot().getId(), s.getLot().getNumber(),
+                                s.getLot().getExpiryDate(), s.getQuantity()))
+                        .toList();
+        return new SheetLabelPreviewDTO(index, status, lot == null ? null : lot.getId(),
+                m == null ? null : m.getId(), m == null ? null : m.getRef(),
+                m == null ? null : m.getComponent(), m == null ? null : m.getDescription(), m == null ? null : m.getSize(),
+                shown == null ? null : shown.getNumber(), shown == null ? null : shown.getExpiryDate(), options);
+    }
+
+    /**
+     * Sheet labels: the 2D code (checksum-protected) is used as it is; for 1D labels the lot barcode decides and
+     * the GTIN read beside it only tells apart lots with the same number (a misread GTIN must not hide the lot).
+     */
+    private LotScanService.Result resolveSheetLabel(SheetItemsDTO.LabelDTO l, Hospital h) {
+        if (notBlank(l.code())) return lotScanService.resolve(l.code(), l.ref(), h);
+        LotScanService.Result byLot = lotScanService.resolve(l.lot(), l.ref(), h);
+        String gtin = MaterialService.normalizeGtin(l.gtin());
+        if (byLot.status() == LotScanService.Status.AMBIGUOUS && gtin != null) {
+            LotScanService.Result byGtin = lotScanService.resolve("(01)" + gtin + "(10)" + l.lot().trim(), l.ref(), h);
+            if (byGtin.status() == LotScanService.Status.FOUND) return byGtin;
+        }
+        return byLot;
+    }
+
+    private static java.util.function.Predicate<Material> distinctById() {
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        return m -> seen.add(m.getId());
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.isBlank();
     }
 
     @Transactional
@@ -286,8 +397,12 @@ public class SurgeryService {
     }
 
     private WithdrawalResultDTO recordScan(Surgery c, String code, String ref, ReadSource readSource, int qty) {
-        var scan = lotScanService.resolve(code, ref, c.getHospital());
+        return applyResolution(c, lotScanService.resolve(code, ref, c.getHospital()), code, readSource, qty);
+    }
 
+    /** Records the resolved lot, or creates the pending issue when it was not found or is ambiguous. */
+    private WithdrawalResultDTO applyResolution(Surgery c, LotScanService.Result scan, String code, ReadSource readSource,
+                                                int qty) {
         switch (scan.status()) {
             case NOT_FOUND -> {
                 return pendingIssue(c, code, scan.parsedRef(), qty, readSource, PendingIssueReason.LOT_NOT_FOUND);
@@ -295,10 +410,13 @@ public class SurgeryService {
             case AMBIGUOUS -> {
                 return pendingIssue(c, code, scan.parsedRef(), qty, readSource, PendingIssueReason.AMBIGUOUS_LOT);
             }
-            default -> { /* ENCONTRADO */ }
+            default -> { /* FOUND */ }
         }
+        return recordResolved(c, scan.lot(), code, readSource, qty);
+    }
 
-        Lot lot = scan.lot();
+    /** Lot identified: expired or without balance inside the hospital becomes a pending issue. */
+    private WithdrawalResultDTO recordResolved(Surgery c, Lot lot, String code, ReadSource readSource, int qty) {
         if (lot.isExpired(c.getSurgeryDate())) {
             return pendingIssue(c, code, lot.getMaterial().getRef(), qty, readSource, PendingIssueReason.EXPIRED_LOT);
         }

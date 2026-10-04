@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, FormControlLabel, FormHelperText,
-  FormLabel, Link, Paper, Skeleton, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination,
+  FormLabel, Link, MenuItem, Paper, Skeleton, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TablePagination,
   TableRow, TextField, Typography, useMediaQuery,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
@@ -17,7 +17,7 @@ import ImportResultDialog from '../../components/ImportResultDialog';
 import { PRODUCT_LINES, lineLabel } from '../../utils/format';
 import { tokens } from '../../theme';
 
-const EMPTY = { ref: '', description: '', productLines: [], component: '', size: '', color: '', gtin: '', active: true };
+const EMPTY = { ref: '', description: '', productLines: [], component: '', size: '', color: '', gtin: '', active: true, sectionId: '' };
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 
 /**
@@ -30,6 +30,12 @@ export function ItemDialog({ open, item, initial, onClose, onSaved }) {
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [sections, setSections] = useState([]);
+
+  useEffect(() => {
+    if (!open) return;
+    api('/product-sections').then(setSections).catch(() => setSections([]));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -37,6 +43,7 @@ export function ItemDialog({ open, item, initial, onClose, onSaved }) {
     setForm(item ? {
       ref: item.ref, description: item.description, productLines: item.productLines || [], component: item.component || '',
       size: item.size || '', color: item.color || '', gtin: item.gtin || '', active: item.active !== false,
+      sectionId: item.sectionId || '',
     } : { ...EMPTY, ...initial });
     // initial is only read when the dialog opens
   }, [open, item]);
@@ -58,7 +65,7 @@ export function ItemDialog({ open, item, initial, onClose, onSaved }) {
     const body = {
       ref: form.ref.trim(), description: form.description.trim(), productLines: form.productLines,
       component: form.component.trim() || null, size: form.size.trim() || null, color: form.color || null,
-      gtin: form.gtin.trim() || null, active: form.active,
+      gtin: form.gtin.trim() || null, active: form.active, sectionId: form.sectionId || null,
     };
     setSaving(true);
     try {
@@ -92,6 +99,13 @@ export function ItemDialog({ open, item, initial, onClose, onSaved }) {
               <TextField label="Nome curto (componente)" placeholder="Ex.: Haste Cygnus SP" value={form.component} onChange={set('component')} />
               <TextField label="Tamanho" value={form.size} onChange={set('size')} />
             </Box>
+            <TextField select label="Seção" value={form.sectionId} onChange={set('sectionId')}
+              helperText="Agrupa o item no estoque por material. Cadastre as seções na aba Seções.">
+              <MenuItem value=""><em>Sem seção</em></MenuItem>
+              {sections.filter((s) => s.active || s.id === form.sectionId).map((s) => (
+                <MenuItem key={s.id} value={s.id}>{s.name}{s.active ? '' : ' (inativa)'}</MenuItem>
+              ))}
+            </TextField>
             <FormControl error={Boolean(errors.productLines)}>
               <FormLabel sx={{ fontSize: 13, fontWeight: 500 }}>Linhas</FormLabel>
               <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>
@@ -156,7 +170,7 @@ function CatalogImportDialog({ open, onClose, onImported }) {
           <Stack spacing={2}>
             <Typography variant="body2" color="text.secondary">
               Colunas: REF, DESCRIÇÃO e LINHA (QUADRIL, JOELHO e/ou OMBRO, separadas por vírgula). Opcionais: GTIN, COMPONENTE,
-              TAMANHO e COR (#RRGGBB). REFs já cadastradas são atualizadas.
+              TAMANHO, COR (#RRGGBB) e SEÇÃO (nome de uma seção já cadastrada). REFs já cadastradas são atualizadas.
             </Typography>
             <Link href="/modelos/catalogo.xlsx" download variant="body2">Baixar planilha modelo</Link>
             <FileDropZone title="Arraste a planilha do catálogo aqui" hint=".xlsx ou .xls" file={file} onFile={setFile} />
@@ -228,7 +242,7 @@ export default function ItemsTab() {
                 <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{m.component || m.description}{m.size ? ` · ${m.size}` : ''}</Typography>
               </Box>
               <Typography variant="body2" color="text.secondary">REF <span style={mono}>{m.ref}</span></Typography>
-              <Typography variant="body2" color="text.secondary">{m.productLines.map(lineLabel).join(', ')}</Typography>
+              <Typography variant="body2" color="text.secondary">{m.section || 'Sem seção'} · {m.productLines.map(lineLabel).join(', ')}</Typography>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
                 <StatusChip tone={m.active ? 'success' : 'neutral'}>{m.active ? 'Ativo' : 'Inativo'}</StatusChip>
                 <Button size="small" variant="outlined" startIcon={<EditOutlined />} onClick={() => open(m)}>Editar</Button>
@@ -242,7 +256,7 @@ export default function ItemsTab() {
             <TableHead>
               <TableRow>
                 <TableCell>REF</TableCell><TableCell>Descrição</TableCell><TableCell>Componente</TableCell>
-                <TableCell>Tamanho</TableCell><TableCell>Cor</TableCell><TableCell>Linhas</TableCell><TableCell>GTIN</TableCell>
+                <TableCell>Tamanho</TableCell><TableCell>Cor</TableCell><TableCell>Seção</TableCell><TableCell>Linhas</TableCell><TableCell>GTIN</TableCell>
                 <TableCell>Situação</TableCell><TableCell />
               </TableRow>
             </TableHead>
@@ -254,6 +268,7 @@ export default function ItemsTab() {
                   <TableCell>{m.component}</TableCell>
                   <TableCell>{m.size}</TableCell>
                   <TableCell>{m.color ? <ColorSwatch color={m.color} /> : <Typography variant="caption" color="text.secondary">Sem cor</Typography>}</TableCell>
+                  <TableCell>{m.section || <Typography variant="caption" color="warning.main">Sem seção</Typography>}</TableCell>
                   <TableCell>{m.productLines.length ? m.productLines.map(lineLabel).join(', ')
                     : <Typography variant="caption" color="warning.main">Sem linha</Typography>}</TableCell>
                   <TableCell sx={mono}>{m.gtin}</TableCell>

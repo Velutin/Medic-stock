@@ -11,6 +11,7 @@ import StockPage from './pages/stock/StockPage';
 import RegistryPage from './pages/registry/RegistryPage';
 import EntryPage from './pages/entry/EntryPage';
 import TransferPage from './pages/transfer/TransferPage';
+import SurgeryPage from './pages/surgery/SurgeryPage';
 import ComingSoon from './pages/ComingSoon';
 
 /** Screens already connected to the API; the other menu items show a placeholder until their phase. */
@@ -20,6 +21,7 @@ const PAGES = {
   '/cadastros': <RegistryPage />,
   '/entrada': <EntryPage />,
   '/transferencia': <TransferPage />,
+  '/saida': <SurgeryPage />,
 };
 
 function Home() {

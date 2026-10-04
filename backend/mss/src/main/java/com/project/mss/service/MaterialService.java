@@ -24,6 +24,7 @@ import com.project.mss.model.entity.Material;
 import com.project.mss.model.entity.HospitalPrice;
 import com.project.mss.repository.LotRepository;
 import com.project.mss.repository.MaterialRepository;
+import com.project.mss.repository.ProductSectionRepository;
 import com.project.mss.repository.HospitalPriceRepository;
 import com.project.mss.repository.HospitalRepository;
 import com.project.mss.repository.SurgeryItemRepository;
@@ -37,16 +38,19 @@ public class MaterialService {
     private final HospitalRepository hospitalRepository;
     private final SurgeryItemRepository surgeryItemRepository;
     private final AccessControlService accessControlService;
+    private final ProductSectionRepository productSectionRepository;
 
     public MaterialService(MaterialRepository materialRepository, LotRepository lotRepository,
                            HospitalPriceRepository hospitalPriceRepository, HospitalRepository hospitalRepository,
-                           SurgeryItemRepository surgeryItemRepository, AccessControlService accessControlService) {
+                           SurgeryItemRepository surgeryItemRepository, AccessControlService accessControlService,
+                           ProductSectionRepository productSectionRepository) {
         this.materialRepository = materialRepository;
         this.lotRepository = lotRepository;
         this.hospitalPriceRepository = hospitalPriceRepository;
         this.hospitalRepository = hospitalRepository;
         this.surgeryItemRepository = surgeryItemRepository;
         this.accessControlService = accessControlService;
+        this.productSectionRepository = productSectionRepository;
     }
 
     // ---------------------------------------------------------------- catalog
@@ -265,5 +269,7 @@ public class MaterialService {
         m.setSize(dto.size());
         m.setColor(dto.color() == null || dto.color().isBlank() ? null : dto.color().toUpperCase());
         if (dto.active() != null) m.setActive(dto.active());
+        m.setSection(dto.sectionId() == null ? null : productSectionRepository.findById(dto.sectionId())
+                .orElseThrow(() -> new EntityNotFoundException("Section " + dto.sectionId() + " not found")));
     }
 }

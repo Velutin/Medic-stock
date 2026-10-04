@@ -19,6 +19,7 @@ import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgeryFormDTO;
 import com.project.mss.dto.surgery.SurgerySummaryDTO;
 import com.project.mss.dto.surgery.SheetItemsDTO;
+import com.project.mss.dto.surgery.SheetLabelPreviewDTO;
 import com.project.mss.dto.surgery.WithdrawalResultDTO;
 import com.project.mss.dto.surgery.WithdrawalItemDTO;
 import com.project.mss.service.SurgeryService;
@@ -81,6 +82,14 @@ public class SurgeryController {
     @Operation(summary = "Download the attached consumption sheet")
     public ResponseEntity<byte[]> downloadSheet(@PathVariable Long id) {
         return FileResponses.pdf(surgeryService.downloadSheet(id), "surgery-sheet-" + id + ".pdf", true);
+    }
+
+    @PostMapping("/{id}/sheet/preview")
+    @Operation(summary = "Check the sheet labels before recording them (nothing is recorded)",
+               description = "For each label: the lot and material it resolves to, or why it would become a pending issue; "
+                       + "labels without a readable lot list the hospital lots of the material to choose from.")
+    public List<SheetLabelPreviewDTO> previewSheet(@PathVariable Long id, @RequestBody @Valid SheetItemsDTO dto) {
+        return surgeryService.previewSheet(id, dto);
     }
 
     @PostMapping("/{id}/sheet/items")

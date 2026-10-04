@@ -41,6 +41,7 @@ import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.PriceImportMode;
 import com.project.mss.repository.MinimumStockRepository;
 import com.project.mss.repository.MaterialRepository;
+import com.project.mss.repository.ProductSectionRepository;
 
 /**
  * Excel spreadsheet import (.xls and .xlsx). Also the migration path for the
@@ -67,21 +68,24 @@ public class ImportService {
     private final StockService stockService;
     private final MinimumStockRepository minimumStockRepository;
     private final AccessControlService accessControlService;
+    private final ProductSectionRepository productSectionRepository;
 
     public ImportService(MaterialService materialService, MaterialRepository materialRepository,
                              StockService stockService, MinimumStockRepository minimumStockRepository,
-                             AccessControlService accessControlService) {
+                             AccessControlService accessControlService,
+                             ProductSectionRepository productSectionRepository) {
         this.materialService = materialService;
         this.materialRepository = materialRepository;
         this.stockService = stockService;
         this.minimumStockRepository = minimumStockRepository;
         this.accessControlService = accessControlService;
+        this.productSectionRepository = productSectionRepository;
     }
 
     // ============================================================ catalog
 
     /**
-     * Columns: REF, DESCRIÇÃO, LINHA, [GTIN], [COMPONENTE], [TAMANHO], [COR].
+     * Columns: REF, DESCRIÇÃO, LINHA, [GTIN], [COMPONENTE], [TAMANHO], [COR], [SEÇÃO] (name of a registered section).
      * LINHA accepts one or more lines separated by comma (e.g. "QUADRIL, JOELHO, OMBRO") and replaces
      * the current lines; it may be empty only for materials that already have lines.
      */
@@ -113,6 +117,11 @@ public class ImportService {
             }
             if (m.getProductLines().isEmpty()) {
                 throw new IllegalArgumentException("LINHA is required (QUADRIL, JOELHO and/or OMBRO)");
+            }
+            String sectionText = text(row, col.get("SECAO")).trim();
+            if (!sectionText.isBlank()) {
+                m.setSection(productSectionRepository.findByNameIgnoreCase(sectionText.replaceAll("\\s+", " "))
+                        .orElseThrow(() -> new IllegalArgumentException("section " + sectionText + " is not registered")));
             }
             String comp = text(row, col.get("COMPONENTE"));
             if (!comp.isBlank()) m.setComponent(comp.trim());
@@ -380,6 +389,7 @@ public class ImportService {
                 case "LOCAL", "LOCALIZACAO", "ONDE" -> "LOCAL";
                 case "GTIN", "EAN", "CODIGODEBARRAS", "CODIGOBARRAS" -> "GTIN";
                 case "LINHA", "LINHAS", "LINE", "LINES" -> "LINHA";
+                case "SECAO", "SECOES", "SECTION", "GRUPO" -> "SECAO";
                 case "IDEAL", "IDEALHOSPITAL", "MINIMO", "MINIMOHOSPITAL" -> "IDEAL";
                 case "IDEALTOTAL", "TOTALIDEAL", "MINIMOTOTAL" -> "IDEALTOTAL";
                 default -> n;

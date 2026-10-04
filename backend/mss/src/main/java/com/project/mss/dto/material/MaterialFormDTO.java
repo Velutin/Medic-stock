@@ -18,5 +18,7 @@ public record MaterialFormDTO(
         @Size(max = 100) String component,
         @Size(max = 30) String size,
         @Pattern(regexp = "^$|^#[0-9A-Fa-f]{6}$", message = "Color must use the #RRGGBB format") String color,
-        Boolean active
+        Boolean active,
+        /** Catalog section (optional). */
+        Long sectionId
 ) { }

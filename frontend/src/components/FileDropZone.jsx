@@ -5,14 +5,18 @@ import { tokens } from '../theme';
 
 const ACCEPT = '.xlsx,.xls';
 
-/** Drag-and-drop area for a spreadsheet, with a button for phones and keyboard users. */
-export default function FileDropZone({ title, hint, file, onFile, disabled }) {
+/**
+ * Drag-and-drop area for a file (a spreadsheet by default), with a button for phones and keyboard users.
+ * accept/buttonLabel change the file type; with multiple, onFile receives the list of files.
+ */
+export default function FileDropZone({ title, hint, file, onFile, disabled, accept = ACCEPT, multiple = false,
+  buttonLabel = 'Escolher arquivo .xlsx' }) {
   const input = useRef(null);
   const [over, setOver] = useState(false);
 
   const pick = (files) => {
-    const f = files?.[0];
-    if (f) onFile(f);
+    if (!files || files.length === 0) return;
+    onFile(multiple ? [...files] : files[0]);
   };
 
   return (
@@ -26,9 +30,9 @@ export default function FileDropZone({ title, hint, file, onFile, disabled }) {
       <UploadFileOutlined sx={{ color: tokens.textMuted }} />
       <Typography sx={{ fontSize: 14, fontWeight: 500 }}>{file ? file.name : title}</Typography>
       {hint && <Typography variant="caption" color="text.secondary">{hint}</Typography>}
-      <input ref={input} type="file" accept={ACCEPT} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
+      <input ref={input} type="file" accept={accept} multiple={multiple} hidden onChange={(e) => { pick(e.target.files); e.target.value = ''; }} />
       <Button variant="outlined" size="small" onClick={() => input.current?.click()} disabled={disabled} sx={{ mt: 0.5 }}>
-        {file ? 'Trocar arquivo' : 'Escolher arquivo .xlsx'}
+        {file ? 'Trocar arquivo' : buttonLabel}
       </Button>
     </Box>
   );

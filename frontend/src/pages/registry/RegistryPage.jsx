@@ -6,6 +6,7 @@ import HospitalsTab from './HospitalsTab';
 import ItemsTab from './ItemsTab';
 import PricesTab from './PricesTab';
 import InitialStockTab from './InitialStockTab';
+import SectionsTab from './SectionsTab';
 
 /** Registry (administrators): hospitals, items, prices and initial stock load. */
 export default function RegistryPage() {
@@ -20,12 +21,14 @@ export default function RegistryPage() {
         <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" allowScrollButtonsMobile aria-label="Cadastros">
           <Tab value="hospitals" label="Hospitais" />
           <Tab value="items" label="Itens" />
+          <Tab value="sections" label="Seções" />
           <Tab value="prices" label="Valores" />
           <Tab value="stock" label="Estoque inicial" />
         </Tabs>
       </Box>
       {tab === 'hospitals' && <HospitalsTab hospitals={hospitals} reload={reload} />}
       {tab === 'items' && <ItemsTab />}
+      {tab === 'sections' && <SectionsTab />}
       {tab === 'prices' && <PricesTab hospitals={active} />}
       {tab === 'stock' && <InitialStockTab hospitals={active} />}
     </>

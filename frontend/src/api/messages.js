@@ -90,6 +90,11 @@ const PATTERNS = [
     (m) => `${m[1]} é um centro de distribuição: transfira para um dos hospitais atendidos.`],
   [/^Stock entry (\d+) not found$/, () => 'Entrada não encontrada.'],
   [/^Material (\d+) not found$/, () => 'Item não encontrado no catálogo.'],
+  [/^Section (\d+) not found$/, () => 'Seção não encontrada.'],
+  [/^Section (.+) already exists$/, (m) => `Já existe a seção ${m[1]}.`],
+  [/^Section (.+) has (\d+) items: move them to another section or deactivate it$/,
+    (m) => `A seção ${m[1]} tem ${m[2]} itens: mova-os para outra seção ou desative-a.`],
+  [/^section (.+) is not registered$/, (m) => `seção ${m[1]} não cadastrada em Cadastros → Seções`],
 ];
 
 /** Field-level validation messages. */
@@ -104,6 +109,8 @@ const FIELDS = {
   'Current password is required': 'Informe a senha atual.',
   'Token is required': 'Link inválido.',
   'Destination is required': 'Escolha o destino.',
+  'Section name is required': 'Informe o nome da seção.',
+  'Display order is required': 'Informe a ordem.',
   'Entry date is required': 'Informe a data de recebimento.',
   'The entry date cannot be in the future': 'A data de recebimento não pode ser futura.',
   'Add at least one item': 'Adicione ao menos um item.',

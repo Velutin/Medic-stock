@@ -27,11 +27,14 @@ import com.project.mss.model.entity.Stock;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.Material;
+import com.project.mss.model.entity.MinimumStock;
+import com.project.mss.model.entity.ProductSection;
 import com.project.mss.model.entity.StockMovement;
 import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.MovementType;
 import com.project.mss.repository.StockRepository;
 import com.project.mss.repository.StockMovementRepository;
+import com.project.mss.repository.MinimumStockRepository;
 
 /**
  * Single entry point for balance changes. Every change goes through debit/credit and
@@ -44,13 +47,16 @@ public class StockService {
     private final StockMovementRepository stockMovementRepository;
     private final MaterialService materialService;
     private final AccessControlService accessControlService;
+    private final MinimumStockRepository minimumStockRepository;
 
     public StockService(StockRepository stockRepository, StockMovementRepository stockMovementRepository,
-                          MaterialService materialService, AccessControlService accessControlService) {
+                          MaterialService materialService, AccessControlService accessControlService,
+                          MinimumStockRepository minimumStockRepository) {
         this.stockRepository = stockRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.materialService = materialService;
         this.accessControlService = accessControlService;
+        this.minimumStockRepository = minimumStockRepository;
     }
 
     // ============================================================ base operations
@@ -345,8 +351,8 @@ public class StockService {
 
     /**
      * Surgical tech's stock view: per material, the quantity inside the hospital (storeroom excluded),
-     * ignoring expired lots, without lot details. Grouping by product line is done by the screen
-     * (a material with several lines appears in each of them).
+     * ignoring expired lots, without lot details. Shows the REFs with an ideal greater than zero in the hospital
+     * (quantity 0 when there is no balance) and any REF with balance. The screen groups by section.
      */
     @Transactional(readOnly = true)
     public List<StockSummaryDTO> hospitalSummary(Long hospitalId) {
@@ -354,6 +360,15 @@ public class StockService {
         LocalDate today = LocalDate.now();
         Map<Long, Integer> quantities = new LinkedHashMap<>();
         Map<Long, Material> materials = new LinkedHashMap<>();
+        // REFs the hospital works with: ideal greater than zero (shown even without balance)
+        for (MinimumStock ms : minimumStockRepository.listByHospital(hospitalId)) {
+            Material m = ms.getMaterial();
+            boolean hasIdeal = positive(ms.getHospitalIdeal()) || positive(ms.getIdealTotal());
+            if (!hasIdeal || !Boolean.TRUE.equals(m.getActive())) continue;
+            materials.putIfAbsent(m.getId(), m);
+            quantities.putIfAbsent(m.getId(), 0);
+        }
+        // Balance inside the hospital (valid lots); a REF with balance is shown even without an ideal
         for (Stock e : stockRepository.listByHospital(hospitalId)) {
             if (e.getLocation() != Location.HOSPITAL || e.getQuantity() <= 0 || e.getLot().isExpired(today)) continue;
             Material m = e.getLot().getMaterial();
@@ -362,9 +377,28 @@ public class StockService {
         }
         return materials.values().stream()
                 .sorted(java.util.Comparator.comparing(Material::getRef))
-                .map(m -> new StockSummaryDTO(m.getId(), m.getRef(), m.getComponent(), m.getDescription(), m.getSize(),
-                        m.getColor(), m.getProductLines().stream().sorted().toList(), quantities.get(m.getId())))
+                .map(m -> {
+                    ProductSection s = m.getSection();
+                    return new StockSummaryDTO(m.getId(), m.getRef(), m.getComponent(), m.getDescription(), m.getSize(),
+                            m.getColor(), m.getProductLines().stream().sorted().toList(), quantities.get(m.getId()),
+                            s == null ? null : s.getId(), s == null ? null : s.getName(),
+                            s == null ? null : s.getDisplayOrder());
+                })
                 .toList();
+    }
+
+    /** Lots of a material inside the hospital, valid on the date and with balance, earliest expiry first. */
+    @Transactional(readOnly = true)
+    public List<Stock> lotsInsideHospital(Hospital hospital, Long materialId, LocalDate date) {
+        return stockRepository.listByHospital(hospital.getId()).stream()
+                .filter(e -> e.getLocation() == Location.HOSPITAL && e.getQuantity() > 0
+                        && e.getLot().getMaterial().getId().equals(materialId) && !e.getLot().isExpired(date))
+                .sorted(java.util.Comparator.comparing((Stock e) -> e.getLot().getExpiryDate()))
+                .toList();
+    }
+
+    private static boolean positive(Integer value) {
+        return value != null && value > 0;
     }
 
     @Transactional(readOnly = true)

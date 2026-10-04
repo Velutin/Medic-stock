@@ -12,6 +12,8 @@ import com.project.mss.model.entity.Material;
 
 public interface MaterialRepository extends JpaRepository<Material, Long> {
 
+    long countBySectionId(Long sectionId);
+
     Optional<Material> findByRefIgnoreCase(String ref);
 
     Optional<Material> findByGtin(String gtin);
