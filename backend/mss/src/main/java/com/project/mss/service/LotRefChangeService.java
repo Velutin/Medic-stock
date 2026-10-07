@@ -110,9 +110,30 @@ public class LotRefChangeService {
         List<LotRefConflictDTO.Balance> balances = stockRepository.listByLot(lot.getId()).stream()
                 .map(s -> new LotRefConflictDTO.Balance(s.getHospital().getName(), s.getLocation(), s.getQuantity()))
                 .toList();
+        List<LotRefConflictDTO.SurgeryUse> surgeries = surgeryUses(lot);
         Material m = lot.getMaterial();
         return new LotRefConflictDTO.ExistingLot(lot.getId(), m.getId(), m.getRef(), m.getDescription(),
                 lot.getExpiryDate(), balances.stream().mapToInt(LotRefConflictDTO.Balance::quantity).sum(),
-                surgeryItemRepository.usedInSurgery(lot.getId()), balances);
+                !surgeries.isEmpty(), balances, surgeries);
+    }
+
+    /**
+     * Surgeries (not cancelled) where this lot was withdrawn, newest first. A lot can appear in more than one
+     * item of the same surgery, so the quantities are added up per surgery. This is also what tells whether the
+     * lot can change REF: a lot used in a surgery never changes.
+     */
+    private List<LotRefConflictDTO.SurgeryUse> surgeryUses(Lot lot) {
+        Map<Long, LotRefConflictDTO.SurgeryUse> bySurgery = new LinkedHashMap<>();
+        for (var item : surgeryItemRepository.listSurgeryUses(lot.getId())) {
+            var surgery = item.getSurgery();
+            int quantity = item.getQuantity() == null ? 0 : item.getQuantity();
+            bySurgery.merge(surgery.getId(),
+                    new LotRefConflictDTO.SurgeryUse(surgery.getId(), surgery.getSurgeryDate(),
+                            surgery.getHospital().getName(), surgery.getPatientName(), surgery.getStatus().name(),
+                            quantity, surgery.getSheetFile() != null),
+                    (a, b) -> new LotRefConflictDTO.SurgeryUse(a.surgeryId(), a.surgeryDate(), a.hospital(),
+                            a.patient(), a.status(), a.quantity() + b.quantity(), a.hasSheet()));
+        }
+        return List.copyOf(bySurgery.values());
     }
 }

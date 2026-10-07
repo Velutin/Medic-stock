@@ -88,7 +88,8 @@ function ResolveDialog({ issue, onClose, onDone }) {
   }, [issue, term, inside, notify]);
 
   const found = term.length < 2 || !inside ? null
-    : inside.filter((o) => lotContains(o.lot, term) || o.ref.toUpperCase().includes(term));
+    : inside.filter((o) => lotContains(o.lot, term)
+        || [o.ref, o.material].some((v) => (v || '').toUpperCase().includes(term)));
 
   const save = async () => {
     setSaving(true);
@@ -139,7 +140,7 @@ function ResolveDialog({ issue, onClose, onDone }) {
                   <LotChoices options={suggested} value={lotId} onChange={setLotId} />
                 )}
 
-                <TextField size="small" label="Não está na lista? Pesquise por lote ou REF" value={search} autoComplete="off"
+                <TextField size="small" label="Não está na lista? Pesquise por lote, REF ou material" value={search} autoComplete="off"
                   onChange={(e) => setSearch(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
                   helperText={term.length === 1 ? 'Digite ao menos 2 caracteres.' : ' '} />
@@ -152,7 +153,7 @@ function ResolveDialog({ issue, onClose, onDone }) {
                     <LotChoices options={found.slice(0, MAX_RESULTS)} value={lotId} onChange={setLotId} />
                     {found.length > MAX_RESULTS && (
                       <Typography variant="caption" color="text.secondary">
-                        Mostrando {MAX_RESULTS} de {found.length}. Digite mais do lote ou da REF para refinar.
+                        Mostrando {MAX_RESULTS} de {found.length}. Digite mais do lote, da REF ou do material para refinar.
                       </Typography>
                     )}
                   </>

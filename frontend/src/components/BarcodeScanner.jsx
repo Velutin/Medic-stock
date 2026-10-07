@@ -15,6 +15,34 @@ const HINTS = new Map([
 const COOLDOWN_MS = 800;
 /** Attempts without any code in front of the camera before the same code can be accepted again (~0.6 s). */
 const MISSES_TO_REARM = 3;
+/**
+ * Rear camera at the highest resolution the phone offers, as an "ideal" (a phone that cannot do it gives
+ * what it can, and the camera still opens). Resolution is what makes a small QR code readable: without
+ * asking, Android gives around 640x480, too few pixels on the code, and the user ends up moving the phone
+ * closer than the lens can focus - a rear camera stops focusing at about 10 cm, and the browser cannot switch
+ * to the macro lens the way the phone's own camera app does. With more pixels the code is read from a
+ * distance where the lens focuses normally.
+ */
+const CAMERA = {
+  audio: false,
+  video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+};
+
+/**
+ * Asks for continuous autofocus when the phone exposes it. Usually it is already the default; this covers a
+ * camera left in manual focus. Everything is optional in the browsers, so a failure here is ignored: the
+ * reader keeps working with the focus the phone chose.
+ */
+function keepFocusContinuous(video) {
+  const track = video.srcObject?.getVideoTracks?.()[0];
+  if (!track?.getCapabilities) return;
+  try {
+    if (!track.getCapabilities().focusMode?.includes('continuous')) return;
+    track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+  } catch (unsupported) {
+    // getCapabilities is not available in every browser (e.g. older iOS): nothing to do.
+  }
+}
 
 function cameraMessage(err) {
   if (!window.isSecureContext) return 'A câmera só funciona com o sistema aberto em HTTPS.';
@@ -56,7 +84,7 @@ export default function BarcodeScanner({ onCode, paused = false }) {
     // the first start is cancelled before opening the camera, so the camera is never opened twice.
     const timer = setTimeout(() => {
       const reader = new BrowserMultiFormatReader(HINTS, { delayBetweenScanAttempts: 200 });
-      reader.decodeFromConstraints({ audio: false, video: { facingMode: { ideal: 'environment' } } }, video,
+      reader.decodeFromConstraints(CAMERA, video,
         (result) => {
           const s = state.current;
           if (!result) {
@@ -74,8 +102,12 @@ export default function BarcodeScanner({ onCode, paused = false }) {
           onCodeRef.current(text);
         })
         .then((c) => {
-          if (cancelled) c.stop();
-          else controls = c;
+          if (cancelled) {
+            c.stop();
+            return;
+          }
+          controls = c;
+          keepFocusContinuous(video);
         })
         .catch((err) => {
           if (!cancelled) setError(cameraMessage(err));

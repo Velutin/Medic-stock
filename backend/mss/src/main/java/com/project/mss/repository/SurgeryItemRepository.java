@@ -43,4 +43,16 @@ public interface SurgeryItemRepository extends JpaRepository<SurgeryItem, Long> 
            WHERE i.lot.id = :lotId AND i.surgery.status <> com.project.mss.model.enums.SurgeryStatus.CANCELLED
            """)
     boolean usedInSurgery(@Param("lotId") Long lotId);
+
+    /**
+     * Items of this lot withdrawn in surgeries that were not cancelled, newest surgery first.
+     * Cancelled surgeries are left out on purpose: they do not block the REF change either, so listing them
+     * would show a surgery next to a change the system allows.
+     */
+    @Query("""
+           SELECT i FROM SurgeryItem i JOIN FETCH i.surgery s JOIN FETCH s.hospital
+           WHERE i.lot.id = :lotId AND s.status <> com.project.mss.model.enums.SurgeryStatus.CANCELLED
+           ORDER BY s.surgeryDate DESC, s.id DESC
+           """)
+    List<SurgeryItem> listSurgeryUses(@Param("lotId") Long lotId);
 }

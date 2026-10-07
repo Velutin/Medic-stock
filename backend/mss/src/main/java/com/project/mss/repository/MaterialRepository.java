@@ -18,11 +18,17 @@ public interface MaterialRepository extends JpaRepository<Material, Long> {
 
     Optional<Material> findByGtin(String gtin);
 
+    /**
+     * Catalog search. term (optional, partial, case-insensitive) matches the REF, the name (component),
+     * the description or the GTIN - the same fields the stock by lot searches.
+     */
     @Query("""
            SELECT m FROM Material m
            WHERE (:term IS NULL
                   OR UPPER(m.ref) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
-                  OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%')))
+                  OR UPPER(m.component) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR m.gtin LIKE CONCAT('%', CAST(:term AS String), '%'))
            ORDER BY m.ref
            """)
     Page<Material> find(@Param("term") String term, Pageable pageable);

@@ -219,7 +219,7 @@ export default function ItemsTab() {
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 } }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', mb: 2 }}>
-        <TextField type="search" size="small" label="Buscar" placeholder="REF, nome ou descrição" value={term}
+        <TextField type="search" size="small" label="Buscar" placeholder="REF, nome, descrição ou GTIN" value={term}
           onChange={(e) => setTerm(e.target.value)} sx={{ width: { xs: '100%', sm: 320 } }} />
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
           <Button variant="outlined" startIcon={<UploadFileOutlined />} onClick={() => setImportOpen(true)}>Importar planilha .xlsx</Button>

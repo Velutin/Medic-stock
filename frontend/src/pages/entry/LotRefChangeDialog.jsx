@@ -1,12 +1,52 @@
 import {
-  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Paper, Stack, Typography, useMediaQuery,
+  Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Link, Paper, Stack, Typography, useMediaQuery,
 } from '@mui/material';
+import DescriptionOutlined from '@mui/icons-material/DescriptionOutlined';
 import StatusChip from '../../components/StatusChip';
+import { API_BASE } from '../../config';
 import { formatDate } from '../../utils/format';
 import { tokens } from '../../theme';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const where = (b) => `${b.hospital}${b.location === 'STOREROOM' ? ' (sala)' : ''}`;
+const SURGERY_STATUS = { OPEN: 'Em aberto', COMPLETED: 'Concluída' };
+
+/**
+ * Surgeries where the lot already went out (cancelled ones are not listed: they do not block the change).
+ * Each one links to the consumption sheet attached to it, so the administrator can check what happened
+ * before fixing the REF of the item being received.
+ */
+function SurgeryUses({ surgeries }) {
+  if (!surgeries?.length) return null;
+  return (
+    <Box sx={{ mt: 1, pl: 1.5, borderLeft: `2px solid ${tokens.border}` }}>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        {surgeries.length === 1 ? 'Saiu nesta cirurgia:' : `Saiu em ${surgeries.length} cirurgias:`}
+      </Typography>
+      <Stack spacing={0.75}>
+        {surgeries.map((s) => (
+          <Box key={s.surgeryId} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
+            <Typography variant="body2">
+              {formatDate(s.surgeryDate)} · {s.hospital} · {s.patient}
+              {s.quantity > 1 ? ` · ${s.quantity} unidades` : ''}
+            </Typography>
+            <StatusChip tone={s.status === 'COMPLETED' ? 'success' : 'warning'}>
+              {SURGERY_STATUS[s.status] || s.status}
+            </StatusChip>
+            {s.hasSheet ? (
+              <Link href={`${API_BASE}/surgeries/${s.surgeryId}/sheet`} target="_blank" rel="noopener"
+                variant="body2" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.25 }}>
+                <DescriptionOutlined fontSize="inherit" /> Ver ficha
+              </Link>
+            ) : (
+              <Typography variant="caption" color="text.secondary">Sem ficha anexada</Typography>
+            )}
+          </Box>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
 
 /**
  * A lot number belongs to only one REF. Shows the lots that already have the number with another REF and asks to
@@ -42,7 +82,7 @@ export default function LotRefChangeDialog({ conflict, onConfirm, onCancel }) {
               {blocked({ lots }) && (
                 <Alert severity="error" sx={{ mb: 1.5 }}>
                   Este lote já saiu em cirurgia com a REF atual e não pode mudar de REF. Confira a REF do item que está
-                  entrando; ele não será adicionado.
+                  entrando; ele não será adicionado. As cirurgias estão listadas abaixo, com a ficha de cada uma.
                 </Alert>
               )}
               <Stack divider={<Box sx={{ borderTop: `1px solid ${tokens.divider}` }} />}>
@@ -63,6 +103,7 @@ export default function LotRefChangeDialog({ conflict, onConfirm, onCancel }) {
                         ? <StatusChip tone="error">Já saiu em cirurgia</StatusChip>
                         : <StatusChip tone="warning">{l.units} {l.units === 1 ? 'unidade' : 'unidades'}</StatusChip>}
                     </Box>
+                    <Box sx={{ flexBasis: '100%' }}><SurgeryUses surgeries={l.surgeries} /></Box>
                   </Box>
                 ))}
               </Stack>

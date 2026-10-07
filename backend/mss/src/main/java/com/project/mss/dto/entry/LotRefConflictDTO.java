@@ -22,7 +22,15 @@ public record LotRefConflictDTO(
                         @NotBlank(message = "Lot is required") String lot) { }
 
     public record ExistingLot(Long lotId, Long materialId, String ref, String description, LocalDate expiryDate,
-                              int units, boolean usedInSurgery, List<Balance> balances) { }
+                              int units, boolean usedInSurgery, List<Balance> balances, List<SurgeryUse> surgeries) { }
 
     public record Balance(String hospital, Location location, int quantity) { }
+
+    /**
+     * Surgery where this lot was withdrawn, so the administrator can check what happened before fixing the REF.
+     * Cancelled surgeries are not listed: they do not block the change. hasSheet tells whether the consumption
+     * sheet is attached and can be opened at GET /surgeries/{surgeryId}/sheet.
+     */
+    public record SurgeryUse(Long surgeryId, LocalDate surgeryDate, String hospital, String patient,
+                             String status, int quantity, boolean hasSheet) { }
 }

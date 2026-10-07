@@ -56,7 +56,8 @@ export default function PricesTab({ hospitals }) {
 
   const filtered = useMemo(() => {
     const t = term.trim().toLowerCase();
-    return (prices || []).filter((p) => !t || p.ref.toLowerCase().includes(t) || (p.description || '').toLowerCase().includes(t));
+    return (prices || []).filter((p) => !t || [p.ref, p.component, p.description]
+      .some((v) => (v || '').toLowerCase().includes(t)));
   }, [prices, term]);
 
   const uploadCard = (mode, title, text, dropTitle) => (
@@ -95,7 +96,7 @@ export default function PricesTab({ hospitals }) {
       <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 } }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 2, mb: 2 }}>
           <Typography variant="h2" component="h2">Valores atuais{hospital ? ` · ${hospital.name}` : ''}</Typography>
-          <TextField type="search" size="small" label="Buscar" placeholder="REF ou descrição" value={term}
+          <TextField type="search" size="small" label="Buscar" placeholder="REF, nome ou descrição" value={term}
             onChange={(e) => setTerm(e.target.value)} sx={{ width: { xs: '100%', sm: 300 } }} />
         </Box>
         {prices === null ? (
@@ -115,7 +116,12 @@ export default function PricesTab({ hospitals }) {
                 {filtered.map((p) => (
                   <TableRow key={p.materialId} hover>
                     <TableCell sx={{ fontFamily: tokens.mono, fontSize: 13 }}>{p.ref}</TableCell>
-                    <TableCell>{p.description}</TableCell>
+                    <TableCell>
+                      {p.description}
+                      {p.component && (
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{p.component}</Typography>
+                      )}
+                    </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontWeight: 500 }}>{formatMoney(p.value)}</TableCell>
                     <TableCell>{p.sourceHospitalId === hospitalId ? 'Própria' : p.sourceHospital}</TableCell>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>{formatDateTime(p.updatedAt)}</TableCell>
