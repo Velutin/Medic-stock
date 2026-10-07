@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.project.mss.model.enums.Location;
-import com.project.mss.model.enums.LoanStatus;
+import com.project.mss.model.enums.LoanType;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -31,19 +31,21 @@ public class Loan {
     @Column(name = "source_location", nullable = false, length = 10)
     private Location sourceLocation;
 
-    @ManyToOne(fetch = FetchType.EAGER, optional = false)
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    private LoanType type = LoanType.LOAN;
+
+    /** Destination of a loan; null for a return to the supplier. */
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "destination_hospital_id")
     private Hospital destinationHospital;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 30)
-    private LoanStatus status = LoanStatus.PENDING_NOTIFICATION;
+    /** Why the material was returned to the supplier (returns only). */
+    @Column(name = "return_reason", columnDefinition = "TEXT")
+    private String returnReason;
 
     @Column(columnDefinition = "TEXT")
     private String notes;
-
-    @Column(name = "notified_at")
-    private LocalDateTime notifiedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")

@@ -1,8 +1,9 @@
 package com.project.mss.service;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.stream.Collectors;
+import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -12,308 +13,313 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.project.mss.repository.HospitalRepository;
 import com.project.mss.dto.user.ChangePasswordDTO;
-import com.project.mss.dto.user.ChangeRoleDTO;
-import com.project.mss.dto.user.ForgotPasswordDTO;
 import com.project.mss.dto.user.LoginDTO;
-import com.project.mss.dto.user.ResetPasswordDTO;
-import com.project.mss.dto.user.UserBasicInfoDTO;
-import com.project.mss.dto.user.UserDataUpdateDTO;
-import com.project.mss.dto.user.UserFromEntityDTO;
-import com.project.mss.dto.user.UserProfileDTO;
-import com.project.mss.dto.user.UserRegDTO;
-import com.project.mss.dto.user.UserResponseDTO;
+import com.project.mss.dto.user.PasswordResetDTO;
+import com.project.mss.dto.user.PasswordResetRequestDTO;
+import com.project.mss.dto.user.UserDTO;
+import com.project.mss.dto.user.UserFormDTO;
+import com.project.mss.dto.user.UserHospitalsDTO;
+import com.project.mss.dto.user.UserUpdateDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
-import com.project.mss.exception.InvalidOperationException;
+import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.entity.PasswordResetToken;
 import com.project.mss.model.entity.Role;
 import com.project.mss.model.entity.User;
+import com.project.mss.model.enums.TokenPurpose;
 import com.project.mss.model.enums.UserRole;
+import com.project.mss.repository.HospitalRepository;
 import com.project.mss.repository.RoleRepository;
 import com.project.mss.repository.UserRepository;
+import com.project.mss.util.BrazilianDocuments;
 
+/**
+ * Users log in by e-mail. A new user has no password: an invitation e-mail (valid for 48 hours)
+ * lets the user create it. CPF (valid and unique) and mobile phone are required on every
+ * registration and edit. The profile (role) is one of ADMIN, SURGICAL_TECH or USER; every user
+ * also keeps the base USER role. MASTER cannot be assigned or changed through the API.
+ */
 @Service
 public class UserService {
 
-    private final AuthenticationManager authenticationManager;    
-    
+    private final AuthenticationManager authenticationManager;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
-    private final HospitalRepository hospitalRepository;    
+    private final HospitalRepository hospitalRepository;
     private final TokenService tokenService;
     private final EmailService emailService;
     private final PasswordResetTokenService passwordResetTokenService;
-    private final BCryptPasswordEncoder passwordEncoder;
+    private final AccessControlService accessControlService;
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(AuthenticationManager authenticationManager, UserRepository userRepository,
-                       RoleRepository roleRepository, HospitalRepository hospitalRepository, TokenService tokenService, EmailService emailService,                       
-                       PasswordResetTokenService passwordResetTokenService) {
-        this.authenticationManager = authenticationManager;        
-        
+                       RoleRepository roleRepository, HospitalRepository hospitalRepository,
+                       TokenService tokenService, EmailService emailService,
+                       PasswordResetTokenService passwordResetTokenService,
+                       AccessControlService accessControlService) {
+        this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
-        this.hospitalRepository =hospitalRepository;
+        this.hospitalRepository = hospitalRepository;
         this.tokenService = tokenService;
         this.emailService = emailService;
         this.passwordResetTokenService = passwordResetTokenService;
-        this.passwordEncoder = new BCryptPasswordEncoder();
+        this.accessControlService = accessControlService;
     }
 
+    // ============================================================ session
+
+    /** Authenticates by e-mail and password and returns the session token. */
     public String login(LoginDTO login) {
-        var usernamePassToken = new UsernamePasswordAuthenticationToken(login.username(), login.password());
-        var auth = authenticationManager.authenticate(usernamePassToken);
-        return tokenService.generateToken((User) auth.getPrincipal());
+        var credentials = new UsernamePasswordAuthenticationToken(normalizeEmail(login.email()), login.password());
+        var auth = authenticationManager.authenticate(credentials);
+        return tokenService.generateToken((User) auth.getPrincipal(), login.rememberMe());
     }
 
-    public UserProfileDTO getProfile(String username) {
-        User user = findUserByUsername(username);        
-
-        
-
-        return new UserProfileDTO(
-                user.getId(),                
-                user.getUsername(),
-                user.getEmail(),
-                user.getRoles().stream().map(r -> r.getAuthority()).toList()
-        );
+    /** User of a freshly issued token (used in the login response, before the cookie is sent back). */
+    @Transactional(readOnly = true)
+    public UserDTO findByToken(String token) {
+        Long id = tokenService.validate(token)
+                .orElseThrow(() -> new BusinessRuleException("Invalid session")).userId();
+        return UserDTO.of(load(id));
     }
 
-    public void register(UserRegDTO newUser) {
-        validateUniqueUsername(newUser.username());
-        validateUniqueEmail(newUser.email());
-        String encodedPassword = new BCryptPasswordEncoder().encode(newUser.password());
-        Role defaultRole = roleRepository.findByRole(UserRole.USER.name())
-                .orElseThrow(() -> new EntityNotFoundException("Role USER not found"));
-        User user = new User(newUser.username(), newUser.email(), encodedPassword, defaultRole);
-        if (newUser.role() != null && newUser.role() != UserRole.USER) {
-            if (newUser.role() == UserRole.MASTER) {
-                throw new BusinessRuleException("The MASTER role cannot be assigned at registration");
-            }
-            Role extraRole = roleRepository.findByRole(newUser.role().name())
-                    .orElseThrow(() -> new EntityNotFoundException("Role " + newUser.role() + " not found"));
-            user.addRole(extraRole);
-        }
-
-        if (newUser.hospitalIds() != null && !newUser.hospitalIds().isEmpty()) {
-            var hospitals = hospitalRepository.findAllById(newUser.hospitalIds());
-            if (hospitals.size() != newUser.hospitalIds().size()) {
-                throw new EntityNotFoundException("One or more hospitals do not exist");
-            }
-            user.getHospitals().addAll(hospitals);
-        }
-        userRepository.save(user);
-        emailService.sendUserRegistrationEmail(user.getId(),user.getEmail());
+    @Transactional(readOnly = true)
+    public UserDTO me() {
+        return UserDTO.of(accessControlService.currentUser());
     }
 
-    public void addRole(ChangeRoleDTO dto) {
-        Role newRole = roleRepository.findByRole(dto.role())
-                .orElseThrow(() -> new EntityNotFoundException("Role " + dto.role() + " not found"));
-        User user = findUserByUsername(dto.username());
-
-        if (user.getRoles().contains(newRole)) {
-            throw new BusinessRuleException("User already has role " + dto.role());
-        }
-
-        user.addRole(newRole);
-        userRepository.save(user);
-    }
-
-    public void removeRole(ChangeRoleDTO dto) {
-        Role roleToRemove = roleRepository.findByRole(dto.role())
-                .orElseThrow(() -> new EntityNotFoundException("Role " + dto.role() + " not found"));
-        User user = findUserByUsername(dto.username());
-
-        if (roleToRemove.getAuthority().equals(UserRole.MASTER.name())) {
-            throw new BusinessRuleException("Cannot remove the MASTER role");
-        }
-        if (roleToRemove.getAuthority().equals(UserRole.USER.name())) {
-            throw new BusinessRuleException("Cannot remove the default USER role");
-        }
-        if (!user.getRoles().contains(roleToRemove)) {
-            throw new BusinessRuleException("User does not have role " + dto.role());
-        }
-
-        user.removeRole(roleToRemove);
-        userRepository.save(user);
-    }
-
-    public Page<UserResponseDTO> getAllUsers(Pageable pageable) {
-        Page<User> users = userRepository.findAll(pageable);
-        return users.map(user -> new UserResponseDTO(
-                user.getId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.isEnabled(),
-                user.getRoles().stream().map(Role::getAuthority).toList()
-        ));
-    }
-
-    public void deactivateUser(UserBasicInfoDTO userDTO) {
-        User user = findUserByUsername(userDTO.username());
-
-        if (!user.getIsActive()) {
-            throw new InvalidOperationException("User " + userDTO.username() + " is already deactivated");
-        }
-
-        user.setIsActive(false);
-        user.setDeactivatedAt(LocalDateTime.now());
-        userRepository.save(user);
-    }
-
-    public void activateUser(UserBasicInfoDTO userDTO) {
-        User user = findUserByUsername(userDTO.username());
-
-        if (user.getIsActive()) {
-            throw new InvalidOperationException("User " + userDTO.username() + " is already active");
-        }
-
-        user.setIsActive(true);
-        user.setDeactivatedAt(null);
-        userRepository.save(user);
-    }
-
-    public UserResponseDTO getUser(String username) {
-        User user = findUserByUsername(username);
-        return new UserResponseDTO(
-                user.getId(),
-                user.getUsername(),
-                user.getEmail(),
-                user.isEnabled(),
-                user.getRoles().stream().map(Role::getAuthority).toList()
-        );
-    }
-
-    public void update(UserDataUpdateDTO dto){
-        User user = findUserByUsername(dto.username());
-        if (dto.email() != null && !dto.email().isBlank()) {
-            validateUniqueEmail(dto.email());
-            user.setEmail(dto.email());
-        }
-        if (dto.password() != null && !dto.password().isBlank()) {
-            String encoded = new BCryptPasswordEncoder().encode(dto.password());
-            user.setPassword(encoded);
-        }
-        if (dto.roles() != null && !dto.roles().isEmpty()) {
-            var resolvedRoles = dto.roles().stream()
-                    .map(r -> roleRepository.findByRole(r.getAuthority())
-                            .orElseThrow(() -> new EntityNotFoundException("Role " + r.getAuthority() + " not found")))
-                    .toList();
-            user.getRoles().clear();
-            user.getRoles().addAll(new java.util.HashSet<>(resolvedRoles));
-        }
-        userRepository.save(user);
-    }
-
-    public void changePassword(String username, ChangePasswordDTO passwordDTO) {
-        User user = findUserByUsername(username);
-        String encodedPassword = new BCryptPasswordEncoder().encode(passwordDTO.newPassword());
-        user.setPassword(encodedPassword);
-        userRepository.save(user);
-        emailService.sendPasswordChangeConfirmationEmail(user.getId(), user.getEmail());
-    }
-
-    public User findOrCreateUser(UserFromEntityDTO userDTO) {
-        if (userDTO.username() == null || userDTO.username().isBlank()) {
-            String username = generateUsernameFromName(userDTO.name());
-            validateUniqueEmail(userDTO.email());
-            String tempPassword = new BCryptPasswordEncoder().encode("temp123");
-            Role defaultRole = roleRepository.findByRole(UserRole.USER.name())
-                    .orElseThrow(() -> new EntityNotFoundException("Role USER not found"));
-            User newUser = new User(username, userDTO.email(), tempPassword, defaultRole);
-            emailService.sendUserAutoRegistrationEmail(newUser.getId(),newUser.getEmail(), newUser.getUsername());
-            return userRepository.save(newUser);
-        }
-        User user = (User) userRepository.findByUsername(userDTO.username());
-        if (user == null) {
-            throw new EntityNotFoundException("User " + userDTO.username() + " not found");
-        }
-        return user;
-    }
-
-    public List<String> getUserRoles(String username) {
-        User user = findUserByUsername(username);
-        return user.getRoles().stream()
-            .map(Role::getRole)
-            .collect(Collectors.toList());
-    }
-
+    /**
+     * Changes the current user's password and ends every other open session.
+     * Returns the new token for the current session, so the user stays logged in on this device.
+     */
     @Transactional
-    public void requestPasswordReset(ForgotPasswordDTO dto) {
-        User user = userRepository.findByEmail(dto.email())
-            .orElseThrow(() -> new EntityNotFoundException("No user found with this email"));
-
-        if (!user.getUsername().equals(dto.username())) {
-            throw new BusinessRuleException("Username does not match the given email");
+    public String changeOwnPassword(ChangePasswordDTO dto, boolean rememberMe) {
+        User user = accessControlService.currentUser();
+        if (user.getPassword() == null || !passwordEncoder.matches(dto.currentPassword(), user.getPassword())) {
+            throw new BusinessRuleException("Current password is incorrect");
         }
-
-    String token = passwordResetTokenService.createToken(user);
-    emailService.sendPasswordResetEmail(user.getId(), user.getEmail(), user.getUsername(), token);
-}
-
-    @Transactional
-    public void resetPassword(ResetPasswordDTO dto) {
-        User user = passwordResetTokenService.validateToken(dto.token());
         if (passwordEncoder.matches(dto.newPassword(), user.getPassword())) {
             throw new BusinessRuleException("The new password cannot be the same as the current one");
         }
-        user.setPassword(passwordEncoder.encode(dto.newPassword()));
-        userRepository.save(user);
-        passwordResetTokenService.markTokenAsUsed(dto.token());
+        setPassword(user, dto.newPassword());
+        emailService.sendPasswordChangeConfirmationEmail(user.getId(), user.getEmail());
+        return tokenService.generateToken(user, rememberMe);
     }
 
-    // Helper methods
-    private String generateUsernameFromName(String name) {
-        String baseName = (name == null || name.isBlank()) ? "user" : name;
-        // Remove acentos e caracteres especiais
-        String normalized = java.text.Normalizer.normalize(baseName, java.text.Normalizer.Form.NFD)
-                .replaceAll("[^\\p{ASCII}]", "");
-        // Converts to lowercase and removes spaces
-        String username = normalized.toLowerCase()
-                .replaceAll("\\s+", ".")
-                .replaceAll("[^a-z0-9.]", "");
-        // Limita o tamanho
-        if (username.length() > 20) {
-            username = username.substring(0, 20);
-        }
-        return ensureUniqueUsername(username);
+    // ============================================================ first access and password reset
+
+    /**
+     * Sends a reset link. The response is the same whether the e-mail exists or not, so the endpoint
+     * cannot be used to discover registered e-mails. A user who has not completed the first access
+     * receives a new invitation instead.
+     */
+    @Transactional
+    public void requestPasswordReset(PasswordResetRequestDTO dto) {
+        userRepository.findByEmail(normalizeEmail(dto.email()))
+                .filter(u -> Boolean.TRUE.equals(u.getIsActive()))
+                .ifPresent(user -> {
+                    if (user.isPendingFirstAccess()) {
+                        sendInvitation(user);
+                    } else {
+                        String token = passwordResetTokenService.createToken(user, TokenPurpose.PASSWORD_RESET);
+                        emailService.sendPasswordResetEmail(user.getId(), user.getEmail(), user.getName(), token);
+                    }
+                });
     }
 
-    private String ensureUniqueUsername(String baseUsername) {
-        String username = baseUsername;
-        int counter = 1;
-        while (userRepository.existsByUsername(username)) {
-            username = baseUsername + counter;
-            counter++;
+    /** Creates the password from an e-mail link: first access (invitation) or password reset. */
+    @Transactional
+    public void resetPassword(PasswordResetDTO dto) {
+        PasswordResetToken token = passwordResetTokenService.validateToken(dto.token());
+        User user = token.getUser();
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new BusinessRuleException("This user is inactive");
         }
-        return username;
-    }
-    User findUserByUsername(String username) {
-        User user = (User) userRepository.findByUsername(username);
-        if (user == null) {
-            throw new EntityNotFoundException("User " + username + " not found");
+        if (user.getPassword() != null && passwordEncoder.matches(dto.newPassword(), user.getPassword())) {
+            throw new BusinessRuleException("The new password cannot be the same as the current one");
         }
-        return user;
-    }
-    public User findUserDTOByUsername(String username) {
-        User user = (User) userRepository.findByUsername(username);
-        
-        if (user == null) {
-            throw new EntityNotFoundException("User " + username + " not found");
-        }
-        return user;
+        setPassword(user, dto.newPassword());
+        passwordResetTokenService.markTokenAsUsed(token);
     }
 
-    private void validateUniqueUsername(String username) {
-        if (userRepository.existsByUsername(username)) {
-            throw new BusinessRuleException("Username " + username + " is already in use");
-        }
+    // ============================================================ administration
+
+    @Transactional(readOnly = true)
+    public Page<UserDTO> list(Pageable pageable) {
+        accessControlService.requireManager();
+        return userRepository.findAll(pageable).map(UserDTO::of);
     }
 
-    private void validateUniqueEmail(String email) {
+    @Transactional(readOnly = true)
+    public UserDTO find(Long id) {
+        accessControlService.requireManager();
+        return UserDTO.of(load(id));
+    }
+
+    /** Creates the user without password and sends the first-access invitation. */
+    @Transactional
+    public UserDTO create(UserFormDTO dto) {
+        accessControlService.requireManager();
+        String email = normalizeEmail(dto.email());
         if (userRepository.existsByEmail(email)) {
             throw new BusinessRuleException("Email " + email + " is already registered");
         }
-    }    
+        String cpf = validCpf(dto.cpf());
+        if (userRepository.existsByCpf(cpf)) {
+            throw new BusinessRuleException("CPF " + dto.cpf() + " is already registered");
+        }
 
+        User user = new User(dto.name().trim(), email, role(UserRole.USER));
+        user.setCpf(cpf);
+        user.setPhone(validPhone(dto.phone()));
+        applyRole(user, dto.role());
+        if (dto.hospitalIds() != null) {
+            user.getHospitals().addAll(hospitals(dto.hospitalIds()));
+        }
+        user = userRepository.save(user);
+        sendInvitation(user);
+        return UserDTO.of(user);
+    }
+
+    /** Changes only the informed fields. CPF and phone must be valid (and filled) after the change. */
+    @Transactional
+    public UserDTO update(Long id, UserUpdateDTO dto) {
+        accessControlService.requireManager();
+        User user = load(id);
+
+        if (dto.name() != null && !dto.name().isBlank()) {
+            user.setName(dto.name().trim());
+        }
+        if (dto.email() != null && !dto.email().isBlank()) {
+            String email = normalizeEmail(dto.email());
+            if (userRepository.existsByEmailAndIdNot(email, id)) {
+                throw new BusinessRuleException("Email " + email + " is already registered");
+            }
+            user.setEmail(email);
+        }
+        if (dto.cpf() != null && !dto.cpf().isBlank()) {
+            String cpf = validCpf(dto.cpf());
+            if (userRepository.existsByCpfAndIdNot(cpf, id)) {
+                throw new BusinessRuleException("CPF " + dto.cpf() + " is already registered");
+            }
+            user.setCpf(cpf);
+        }
+        if (dto.phone() != null && !dto.phone().isBlank()) {
+            user.setPhone(validPhone(dto.phone()));
+        }
+        if (user.getCpf() == null || user.getPhone() == null) {
+            throw new BusinessRuleException("CPF and mobile phone are required");
+        }
+        if (dto.role() != null) {
+            if (user.hasAnyRole(UserRole.MASTER.name())) {
+                throw new BusinessRuleException("The MASTER profile cannot be changed");
+            }
+            applyRole(user, dto.role());
+        }
+        if (dto.active() != null) {
+            setActive(user, dto.active());
+        }
+        return UserDTO.of(userRepository.save(user));
+    }
+
+    @Transactional
+    public UserDTO setHospitals(Long id, UserHospitalsDTO dto) {
+        accessControlService.requireManager();
+        User user = load(id);
+        user.getHospitals().clear();
+        user.getHospitals().addAll(hospitals(dto.hospitalIds()));
+        return UserDTO.of(userRepository.save(user));
+    }
+
+    /** Sends a new first-access link (the previous one stops working). */
+    @Transactional
+    public void resendInvitation(Long id) {
+        accessControlService.requireManager();
+        User user = load(id);
+        if (!user.isPendingFirstAccess()) {
+            throw new BusinessRuleException("This user has already completed the first access");
+        }
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new BusinessRuleException("This user is inactive");
+        }
+        sendInvitation(user);
+    }
+
+    // ============================================================ helpers
+
+    private void sendInvitation(User user) {
+        String token = passwordResetTokenService.createToken(user, TokenPurpose.INVITATION);
+        emailService.sendInvitationEmail(user.getId(), user.getEmail(), user.getName(), token);
+    }
+
+    /** Sets the password and ends every session issued before now. */
+    private void setPassword(User user, String rawPassword) {
+        user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setSessionsValidAfter(LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS));
+        userRepository.save(user);
+    }
+
+    /** Keeps the base USER role and sets the profile role (ADMIN, SURGICAL_TECH or USER only). */
+    private void applyRole(User user, UserRole profile) {
+        if (profile == UserRole.MASTER) {
+            throw new BusinessRuleException("The MASTER profile cannot be assigned");
+        }
+        user.getRoles().removeIf(r -> r.getRole().equals(UserRole.ADMIN.name())
+                || r.getRole().equals(UserRole.SURGICAL_TECH.name()));
+        if (user.getRoles().stream().noneMatch(r -> r.getRole().equals(UserRole.USER.name()))) {
+            user.addRole(role(UserRole.USER));
+        }
+        if (profile != UserRole.USER) {
+            user.addRole(role(profile));
+        }
+    }
+
+    private void setActive(User user, boolean active) {
+        if (!active && user.hasAnyRole(UserRole.MASTER.name())) {
+            throw new BusinessRuleException("The MASTER user cannot be deactivated");
+        }
+        if (!active && user.getId().equals(accessControlService.currentUser().getId())) {
+            throw new BusinessRuleException("You cannot deactivate your own user");
+        }
+        user.setIsActive(active);
+        user.setDeactivatedAt(active ? null : LocalDateTime.now());
+    }
+
+    private Role role(UserRole r) {
+        return roleRepository.findByRole(r.name())
+                .orElseThrow(() -> new EntityNotFoundException("Role " + r + " not found"));
+    }
+
+    private Set<Hospital> hospitals(Set<Long> ids) {
+        var found = new HashSet<>(hospitalRepository.findAllById(ids));
+        if (found.size() != ids.size()) {
+            throw new EntityNotFoundException("One or more hospitals do not exist");
+        }
+        return found;
+    }
+
+    private User load(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found"));
+    }
+
+    private static String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase();
+    }
+
+    private static String validCpf(String cpf) {
+        if (!BrazilianDocuments.isValidCpf(cpf)) {
+            throw new BusinessRuleException("Invalid CPF");
+        }
+        return BrazilianDocuments.digits(cpf);
+    }
+
+    private static String validPhone(String phone) {
+        if (!BrazilianDocuments.isValidMobile(phone)) {
+            throw new BusinessRuleException("Invalid mobile phone: use DDD + 9 digits, e.g. (71) 99999-9999");
+        }
+        return BrazilianDocuments.digits(phone);
+    }
 }

@@ -7,6 +7,7 @@ public record StockRowDTO(
         Long materialId,
         String ref,
         String description,
+        java.util.List<com.project.mss.model.enums.ProductLine> productLines,
         String component,
         String size,
         String color,

@@ -46,17 +46,19 @@ public class ReportService {
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
 
     private final PdfService pdfService;
-    private final ReplenishmentService replenishmentService;
+    private final DeliveryService deliveryService;
+    private final SupplierOrderService supplierOrderService;
     private final LoanService loanService;
     private final StockService stockService;
     private final SurgeryRepository surgeryRepository;
     private final AccessControlService accessControlService;
 
-    public ReportService(PdfService pdfService, ReplenishmentService replenishmentService,
-                            LoanService loanService, StockService stockService,
+    public ReportService(PdfService pdfService, DeliveryService deliveryService,
+                            SupplierOrderService supplierOrderService, LoanService loanService, StockService stockService,
                             SurgeryRepository surgeryRepository, AccessControlService accessControlService) {
         this.pdfService = pdfService;
-        this.replenishmentService = replenishmentService;
+        this.deliveryService = deliveryService;
+        this.supplierOrderService = supplierOrderService;
         this.loanService = loanService;
         this.stockService = stockService;
         this.surgeryRepository = surgeryRepository;
@@ -65,54 +67,79 @@ public class ReportService {
 
     // ============================================================ PDFs
 
-    private static final String[] DELIVERY_COLUMNS = {"REF", "Material", "Lote", "Validade", "Qtd"};
-    private static final float[] DELIVERY_WIDTHS = {1.4f, 4.2f, 1.6f, 1.1f, 0.6f};
 
-    /** Hospital delivery report, "Classic" layout, with signatures. */
+    /**
+     * Hospital delivery report, Classic layout. The material column uses the short name
+     * (component) and falls back to the description. Deliveries from a distribution center
+     * look the same: the material leaves the storeroom either way.
+     */
     @Transactional(readOnly = true)
     public byte[] deliveryPdf(Long deliveryId) {
-        Delivery e = replenishmentService.loadDelivery(deliveryId);
+        Delivery e = deliveryService.load(deliveryId);
         List<String[]> rows = e.getItems().stream()
-                .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
-                        i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
+                .map(i -> {
+                    var m = i.getLot().getMaterial();
+                    String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
+                    return new String[]{m.getRef(), name, i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()),
+                            String.valueOf(i.getQuantity())};
+                })
                 .toList();
         int total = e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
-        return pdfService.generate(new PdfService.Report(
-                "RELATÓRIO DE ENTREGA DE MATERIAIS",
-                List.of(new String[]{"Hospital:", e.getHospital().getName()},
-                        new String[]{"Entrega nº:", String.valueOf(e.getId())},
-                        new String[]{"Data:", e.getCreatedAt().format(DATE_TIME)},
-                        new String[]{"Observação:", e.getNotes()}),
-                DELIVERY_COLUMNS, DELIVERY_WIDTHS, rows,
-                "Total de itens: " + total,
-                new String[]{"Entregue por", "Recebido por (hospital)"}));
+        return pdfService.deliveryReport(new PdfService.DeliveryReport(
+                String.valueOf(e.getId()),
+                e.getHospital().getName(),
+                fmt(e.getCreatedAt().toLocalDate()),
+                e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-",
+                rows, total, e.getNotes()));
     }
 
     @Transactional(readOnly = true)
     public byte[] loanPdf(Long loanId) {
         Loan e = loanService.load(loanId);
-        List<String[]> rows = e.getItems().stream()
-                .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
-                        i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
-                .toList();
-        String sourceName = e.getSourceHospital().getName()
-                + (e.getSourceLocation() == Location.STOREROOM ? " (material da sala)" : " (estoque do hospital)");
-        return pdfService.generate(new PdfService.Report(
-                "EMPRÉSTIMO DE MATERIAIS ENTRE HOSPITAIS",
-                List.of(new String[]{"Empréstimo nº:", String.valueOf(e.getId())},
-                        new String[]{"Origem:", sourceName},
-                        new String[]{"Destino:", e.getDestinationHospital().getName()},
-                        new String[]{"Data:", e.getCreatedAt().format(DATE_TIME)},
-                        new String[]{"Observação:", e.getNotes()}),
-                DELIVERY_COLUMNS, DELIVERY_WIDTHS, rows,
-                "Total de itens: " + e.getItems().stream().mapToInt(i -> i.getQuantity()).sum(),
-                new String[]{"Entregue por", "Recebido por (" + e.getDestinationHospital().getName() + ")"}));
+        if (e.getType() == com.project.mss.model.enums.LoanType.RETURN) return returnPdf(e);
+        // The hospital receives a loan as a regular delivery: loan details are internal to the system
+        return pdfService.classicReport(new PdfService.ClassicReport("ENTREGA DE MATERIAIS", "Entrega nº E-" + e.getId(),
+                List.of(new String[]{"HOSPITAL", e.getDestinationHospital().getName()},
+                        new String[]{"DATA DA ENTREGA", fmt(e.getCreatedAt().toLocalDate())},
+                        new String[]{"ENTREGUE POR", e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-"},
+                        new String[]{"TOTAL DE PEÇAS", String.valueOf(pieces(e))}),
+                new float[]{2.6f, 1.3f, 1.6f, 1.1f}, movementRows(e, false), pieces(e), null, null,
+                new String[]{"Entregue por", "Recebido por (nome legível e data)"}));
     }
 
-    /** Supplier order, to be sent via WhatsApp. */
+    /** Return to the supplier: the items sent back to Baumer, to send to the company. */
+    private byte[] returnPdf(Loan e) {
+        return pdfService.classicReport(new PdfService.ClassicReport("DEVOLUÇÃO DE MATERIAIS", "Devolução nº " + e.getId(),
+                List.of(new String[]{"ORIGEM", sourceLabel(e)}, new String[]{"DESTINO", "Baumer"},
+                        new String[]{"DATA DA DEVOLUÇÃO", fmt(e.getCreatedAt().toLocalDate())},
+                        new String[]{"ENVIADO POR", e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-"}),
+                new float[]{2.2f, 1.1f, 1.4f, 1.6f, 1f}, movementRows(e, true), pieces(e), "Motivo", e.getReturnReason(),
+                new String[]{"Enviado por", "Recebido por Baumer (nome legível e data)"}));
+    }
+
+    /** REF, material (short name), lot, expiry date and quantity; returns flag the lots expired on the return date. */
+    private static List<String[]> movementRows(Loan e, boolean flagExpired) {
+        LocalDate day = e.getCreatedAt().toLocalDate();
+        return e.getItems().stream().map(i -> {
+            var m = i.getLot().getMaterial();
+            String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
+            String expiry = fmt(i.getLot().getExpiryDate()) + (flagExpired && i.getLot().isExpired(day) ? " (vencido)" : "");
+            return new String[]{m.getRef(), name, i.getLot().getNumber(), expiry, String.valueOf(i.getQuantity())};
+        }).toList();
+    }
+
+    private static String sourceLabel(Loan e) {
+        return e.getSourceHospital().getName() + (e.getSourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)");
+    }
+
+    private static int pieces(Loan e) {
+        return e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
+    }
+
+    /** Supplier order PDF. */
     @Transactional(readOnly = true)
     public byte[] orderPdf(Long orderId) {
-        SupplierOrder p = replenishmentService.loadOrder(orderId);
+        SupplierOrder p = supplierOrderService.load(orderId);
         List<String[]> rows = p.getItems().stream()
                 .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> !i.getUrgent())
                         .thenComparing(i -> i.getMaterial().getRef()))
@@ -156,7 +183,7 @@ public class ReportService {
             List<Surgery> list = byWeek.getOrDefault(s, List.of());
             weeks.add(new WeeklySurgeriesDTO(s, s.plusDays(6), s.plusDays(6), list.size(),
                     count(list, c -> c.getHospital().getName()),
-                    count(list, c -> c.getSurgicalTech() != null ? c.getSurgicalTech().getUsername() : "(no surgical tech)")));
+                    count(list, c -> c.getSurgicalTech() != null ? c.getSurgicalTech().getName() : "(no surgical tech)")));
         }
         return weeks;
     }

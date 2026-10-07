@@ -1,120 +1,99 @@
 package com.project.mss.controller;
 
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import com.project.mss.config.SessionCookies;
 import com.project.mss.dto.user.ChangePasswordDTO;
-import com.project.mss.dto.user.ChangeRoleDTO;
-import com.project.mss.dto.user.ForgotPasswordDTO;
-import com.project.mss.dto.user.ResetPasswordDTO;
-import com.project.mss.dto.user.UserBasicInfoDTO;
-import com.project.mss.dto.user.UserDataUpdateDTO;
-import com.project.mss.dto.user.UserProfileDTO;
-import com.project.mss.dto.user.UserResponseDTO;
+import com.project.mss.dto.user.UserDTO;
+import com.project.mss.dto.user.UserFormDTO;
+import com.project.mss.dto.user.UserHospitalsDTO;
+import com.project.mss.dto.user.UserUpdateDTO;
 import com.project.mss.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 @RestController
-@RequestMapping("/user")
-@Tag(name = "Users",description = "User management endpoints")
+@RequestMapping("/users")
+@Tag(name = "Users", description = "User management (ADMIN) and the logged-in user's own data")
 public class UserController {
 
     private final UserService userService;
+    private final SessionCookies sessionCookies;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, SessionCookies sessionCookies) {
         this.userService = userService;
+        this.sessionCookies = sessionCookies;
     }
+
+    // ------------------------------------------------------------ logged-in user
 
     @GetMapping("/me")
-    @Operation(summary = "Get authenticated user profile", description = "Returns the authenticated user data.")
-    public ResponseEntity<UserProfileDTO> getProfile(Authentication authentication) {
-        String username = authentication.getName();
-        UserProfileDTO profile = userService.getProfile(username);
-        return ResponseEntity.ok(profile);
+    @Operation(summary = "Logged-in user data")
+    public UserDTO me() {
+        return userService.me();
     }
 
-    @PatchMapping("/add-role")
-    @Operation(summary = "Add role to user", description = "Adds a role to an existing user. Requires ADMIN or MASTER.")
-    public ResponseEntity<String> addRole(@RequestBody @Valid ChangeRoleDTO dto) {
-        userService.addRole(dto);
-        return ResponseEntity.ok("Role added successfully");
+    @PutMapping("/me/password")
+    @Operation(summary = "Change the logged-in user's password",
+               description = "Requires the current password. Every other open session of the user is ended; "
+                       + "this device stays logged in.")
+    public ResponseEntity<Void> changePassword(@RequestBody @Valid ChangePasswordDTO dto, HttpServletRequest request) {
+        boolean rememberMe = sessionCookies.isRememberMe(request);
+        String token = userService.changeOwnPassword(dto, rememberMe);
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, sessionCookies.create(token, rememberMe).toString())
+                .build();
     }
 
-    @PatchMapping("/remove-role")
-    @Operation(summary = "Remove role from user", description = "Removes a role from an existing user. Requires ADMIN or MASTER.")
-    public ResponseEntity<String> removeRole(@RequestBody @Valid ChangeRoleDTO dto) {
-        userService.removeRole(dto);
-        return ResponseEntity.ok("Role removed successfully");
+    // ------------------------------------------------------------ administration
+
+    @GetMapping
+    @Operation(summary = "List users (ADMIN)")
+    public Page<UserDTO> list(@ParameterObject @PageableDefault(size = 50, sort = "name") Pageable pageable) {
+        return userService.list(pageable);
     }
 
-    @GetMapping("/all")
-    @Operation(summary = "List all users", description = "Returns a paginated list of all users. Requires ADMIN or MASTER.")
-    public ResponseEntity<Page<UserResponseDTO>> getAllUsers(Pageable pageable) {
-        Page<UserResponseDTO> users = userService.getAllUsers(pageable);
-        if (users.isEmpty()) {
-            return ResponseEntity.noContent().build();
-        }
-        return ResponseEntity.ok(users);
+    @PostMapping
+    @Operation(summary = "Create a user and send the first-access invitation by e-mail (ADMIN)",
+               description = "The user has no password until opening the e-mail link (valid for 48 hours).")
+    public ResponseEntity<UserDTO> create(@RequestBody @Valid UserFormDTO dto) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(userService.create(dto));
     }
 
-    @GetMapping("/{username}")
-    @Operation(summary = "Get user data by username", description =  "Returns user data for a username. Requires ADMIN or MASTER.")
-    public ResponseEntity<UserResponseDTO> getUser(@PathVariable String username) {
-        UserResponseDTO user = userService.getUser(username);
-        return ResponseEntity.ok(user);
+    @GetMapping("/{id}")
+    @Operation(summary = "User data (ADMIN)")
+    public UserDTO find(@PathVariable Long id) {
+        return userService.find(id);
     }
 
-    @PatchMapping("/deactivate")
-    @Operation(summary = "Deactivate user", description = "Deactivates an existing user. Requires ADMIN or MASTER.")
-    public ResponseEntity<String> deactivateUser(@RequestBody @Valid UserBasicInfoDTO userDTO) {
-        userService.deactivateUser(userDTO);
-        return ResponseEntity.ok("User deactivated successfully");
+    @PatchMapping("/{id}")
+    @Operation(summary = "Change user data, profile or situation (ADMIN)",
+               description = "Only the informed fields change. active=false blocks access immediately on every device.")
+    public UserDTO update(@PathVariable Long id, @RequestBody @Valid UserUpdateDTO dto) {
+        return userService.update(id, dto);
     }
 
-    @PatchMapping("/activate")
-    @Operation(summary = "Activate user", description = "Activates an existing user. Requires ADMIN or MASTER.")
-    public ResponseEntity<String> activateUser(@RequestBody @Valid UserBasicInfoDTO userDTO) {
-        userService.activateUser(userDTO);
-        return ResponseEntity.ok("User activated successfully");
+    @PutMapping("/{id}/hospitals")
+    @Operation(summary = "Set the hospitals the user works at (ADMIN)")
+    public UserDTO setHospitals(@PathVariable Long id, @RequestBody @Valid UserHospitalsDTO dto) {
+        return userService.setHospitals(id, dto);
     }
 
-    @PatchMapping("/update")
-    @Operation(summary = "Update user data", description = "Updates an existing user. Requires ADMIN or MASTER.")
-    public ResponseEntity<String> updateUser(@RequestBody @Valid UserDataUpdateDTO userDTO){
-        userService.update(userDTO);
-        return ResponseEntity.ok("User updated successfully");
-    }
-
-    @PatchMapping("/change-password")
-    @Operation(summary = "Change user password", description = "Changes the password of the logged-in user.")
-    public ResponseEntity<String> changePassword(@RequestBody @Valid ChangePasswordDTO passwordDTO, Authentication auth){ // Authentication injected by Spring Security
-        userService.changePassword(auth.getName(), passwordDTO);
-        return ResponseEntity.ok("Password changed successfully");
-    }
-
-    @PostMapping("/forgot-password")
-    @Operation(summary = "Request password recovery", description = "Sends an email with a password reset link.")
-    public ResponseEntity<String> forgotPassword(@RequestBody @Valid ForgotPasswordDTO dto) {
-        userService.requestPasswordReset(dto);
-        return ResponseEntity.ok("Recovery email sent successfully");
-    }
-
-    @PostMapping("/reset-password")
-    @Operation(summary = "Reset password", description = "Resets the password using the token received by email.")
-    public ResponseEntity<String> resetPassword(@RequestBody @Valid ResetPasswordDTO dto) {
-        userService.resetPassword(dto);
-        return ResponseEntity.ok("Password reset successfully");
+    @PostMapping("/{id}/invitation")
+    @Operation(summary = "Resend the first-access invitation (ADMIN)",
+               description = "Only for users who have not created a password yet. The previous link stops working.")
+    public ResponseEntity<Void> resendInvitation(@PathVariable Long id) {
+        userService.resendInvitation(id);
+        return ResponseEntity.accepted().build();
     }
 }

@@ -1,5 +1,6 @@
 package com.project.mss.controller;
 
+import org.springdoc.core.annotations.ParameterObject;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -14,9 +15,11 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.surgery.SurgeryDTO;
+import com.project.mss.dto.surgery.SurgeryStatusUpdateDTO;
 import com.project.mss.dto.surgery.SurgeryFormDTO;
 import com.project.mss.dto.surgery.SurgerySummaryDTO;
 import com.project.mss.dto.surgery.SheetItemsDTO;
+import com.project.mss.dto.surgery.SheetLabelPreviewDTO;
 import com.project.mss.dto.surgery.WithdrawalResultDTO;
 import com.project.mss.dto.surgery.WithdrawalItemDTO;
 import com.project.mss.service.SurgeryService;
@@ -47,7 +50,7 @@ public class SurgeryController {
     public Page<SurgerySummaryDTO> list(@RequestParam(required = false) Long hospitalId,
                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                           @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-                                          @PageableDefault(size = 30) Pageable pageable) {
+                                          @ParameterObject @PageableDefault(size = 30) Pageable pageable) {
         return surgeryService.list(hospitalId, start, end, pageable);
     }
 
@@ -81,21 +84,25 @@ public class SurgeryController {
         return FileResponses.pdf(surgeryService.downloadSheet(id), "surgery-sheet-" + id + ".pdf", true);
     }
 
+    @PostMapping("/{id}/sheet/preview")
+    @Operation(summary = "Check the sheet labels before recording them (nothing is recorded)",
+               description = "For each label: the lot and material it resolves to, or why it would become a pending issue; "
+                       + "labels without a readable lot list the hospital lots of the material to choose from.")
+    public List<SheetLabelPreviewDTO> previewSheet(@PathVariable Long id, @RequestBody @Valid SheetItemsDTO dto) {
+        return surgeryService.previewSheet(id, dto);
+    }
+
     @PostMapping("/{id}/sheet/items")
     @Operation(summary = "Record the sheet labels (each label = 1 item)")
     public List<WithdrawalResultDTO> recordSheet(@PathVariable Long id, @RequestBody @Valid SheetItemsDTO dto) {
         return surgeryService.recordSheet(id, dto);
     }
 
-    @PatchMapping("/{id}/complete")
-    @Operation(summary = "Complete the surgery (requires no open pending issues)")
-    public SurgeryDTO complete(@PathVariable Long id) {
-        return surgeryService.complete(id);
-    }
-
-    @PatchMapping("/{id}/cancel")
-    @Operation(summary = "Cancel the surgery and return its items to the hospital stock")
-    public SurgeryDTO cancel(@PathVariable Long id, @RequestParam(required = false) String reason) {
-        return surgeryService.cancel(id, reason);
+    @PatchMapping("/{id}")
+    @Operation(summary = "Change the surgery status",
+               description = "COMPLETED requires the consumption sheet and no open pending issues. CANCELLED requires cancellationReason "
+                       + "and returns the items to the hospital stock. A surgery cannot be reopened.")
+    public SurgeryDTO updateStatus(@PathVariable Long id, @RequestBody @Valid SurgeryStatusUpdateDTO dto) {
+        return surgeryService.updateStatus(id, dto);
     }
 }

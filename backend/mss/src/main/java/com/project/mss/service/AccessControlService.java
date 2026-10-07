@@ -63,4 +63,20 @@ public class AccessControlService {
             throw new AccessDeniedException("Operation restricted to administrators");
         }
     }
+
+    /**
+     * Lot-level stock (lots, expiry dates, movements) is visible to administrators and to read-only
+     * users of their hospitals, but not to surgical techs, who only see the stock summary.
+     */
+    public void requireLotAccess() {
+        User user = currentUser();
+        if (!user.isManager() && user.hasAnyRole(com.project.mss.model.enums.UserRole.SURGICAL_TECH.name())) {
+            throw new AccessDeniedException("Surgical techs do not have access to lots");
+        }
+    }
+
+    /** Surgery values (prices, totals) are visible only to administrators. */
+    public boolean canSeeValues() {
+        return currentUser().isManager();
+    }
 }

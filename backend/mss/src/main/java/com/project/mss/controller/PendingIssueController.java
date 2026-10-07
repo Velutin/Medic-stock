@@ -5,7 +5,8 @@ import java.util.List;
 import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.surgery.PendingIssueDTO;
-import com.project.mss.dto.surgery.ResolvePendingIssueDTO;
+import com.project.mss.dto.surgery.PendingIssueStatusUpdateDTO;
+import com.project.mss.dto.surgery.PendingLotOptionDTO;
 import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.service.PendingIssueService;
 
@@ -29,9 +30,19 @@ public class PendingIssueController {
         return pendingIssueService.list(status);
     }
 
-    @PatchMapping("/{id}/resolve")
-    @Operation(summary = "Resolve (providing the correct lot) or discard (without lotId) (ADMIN)")
-    public PendingIssueDTO resolve(@PathVariable Long id, @RequestBody @Valid ResolvePendingIssueDTO dto) {
-        return pendingIssueService.resolve(id, dto);
+    @GetMapping("/{id}/suggestions")
+    @Operation(summary = "Lots inside the hospital to resolve the pending issue (ADMIN)",
+               description = "Valid lots inside the hospital of the material identified by the code read (GTIN, REF or "
+                       + "registered lots with the number read); the lots with the number read come first.")
+    public List<PendingLotOptionDTO> suggestions(@PathVariable Long id) {
+        return pendingIssueService.suggestions(id);
+    }
+
+    @PatchMapping("/{id}")
+    @Operation(summary = "Change the pending issue status (ADMIN)",
+               description = "RESOLVED requires lotId and records that lot in the surgery. "
+                       + "DISCARDED closes the issue without a lot. Both require a resolution text.")
+    public PendingIssueDTO updateStatus(@PathVariable Long id, @RequestBody @Valid PendingIssueStatusUpdateDTO dto) {
+        return pendingIssueService.updateStatus(id, dto);
     }
 }

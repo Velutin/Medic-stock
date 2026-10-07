@@ -6,6 +6,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.imports.ImportResultDTO;
 import com.project.mss.model.enums.Location;
+import com.project.mss.model.enums.PriceImportMode;
 import com.project.mss.service.ImportService;
 import com.project.mss.service.ImportService.StockImportMode;
 
@@ -30,11 +31,15 @@ public class ImportController {
     }
 
     @PostMapping(value = "/hospital/{hospitalId}/prices", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Hospital price table: REF in column A, value in column B")
+    @Operation(summary = "Hospital price table: REF in column A, value in column B",
+               description = "mode=REPLACE: complete table, values of REFs not in the spreadsheet are removed "
+                       + "(nothing is saved if any row has an error). mode=UPDATE: only the REFs in the spreadsheet "
+                       + "are created or changed.")
     public ImportResultDTO prices(@PathVariable Long hospitalId,
-                                         @RequestPart("file") MultipartFile file,
-                                         @RequestParam(defaultValue = "false") boolean createNewRefs) {
-        return importService.prices(hospitalId, file, createNewRefs);
+                                  @RequestPart("file") MultipartFile file,
+                                  @RequestParam PriceImportMode mode,
+                                  @RequestParam(defaultValue = "false") boolean createNewRefs) {
+        return importService.prices(hospitalId, file, mode, createNewRefs);
     }
 
     @PostMapping(value = "/hospital/{hospitalId}/stock", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

@@ -4,7 +4,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.project.mss.model.enums.OrderStatus;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -26,10 +25,6 @@ public class SupplierOrder {
     @JoinColumn(name = "hospital_id")
     private Hospital hospital;
 
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private OrderStatus status = OrderStatus.GENERATED;
-
     @Column(columnDefinition = "TEXT")
     private String notes;
 
@@ -39,9 +34,6 @@ public class SupplierOrder {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
-
-    @Column(name = "sent_at")
-    private LocalDateTime sentAt;
 
     @OneToMany(mappedBy = "supplierOrder", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")

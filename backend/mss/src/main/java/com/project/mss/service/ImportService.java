@@ -13,6 +13,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -24,8 +27,11 @@ import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.project.mss.dto.entry.EntryPreviewRowDTO;
+import com.project.mss.dto.replenishment.MinimumPreviewRowDTO;
 import com.project.mss.dto.imports.ImportResultDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.MinimumStock;
@@ -33,8 +39,10 @@ import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.Material;
 import com.project.mss.model.enums.Location;
+import com.project.mss.model.enums.PriceImportMode;
 import com.project.mss.repository.MinimumStockRepository;
 import com.project.mss.repository.MaterialRepository;
+import com.project.mss.repository.ProductSectionRepository;
 
 /**
  * Excel spreadsheet import (.xls and .xlsx). Also the migration path for the
@@ -61,20 +69,27 @@ public class ImportService {
     private final StockService stockService;
     private final MinimumStockRepository minimumStockRepository;
     private final AccessControlService accessControlService;
+    private final ProductSectionRepository productSectionRepository;
 
     public ImportService(MaterialService materialService, MaterialRepository materialRepository,
                              StockService stockService, MinimumStockRepository minimumStockRepository,
-                             AccessControlService accessControlService) {
+                             AccessControlService accessControlService,
+                             ProductSectionRepository productSectionRepository) {
         this.materialService = materialService;
         this.materialRepository = materialRepository;
         this.stockService = stockService;
         this.minimumStockRepository = minimumStockRepository;
         this.accessControlService = accessControlService;
+        this.productSectionRepository = productSectionRepository;
     }
 
     // ============================================================ catalog
 
-    /** Columns: REF, DESCRIÇÃO, [GTIN], [COMPONENTE], [TAMANHO], [COR]. */
+    /**
+     * Columns: REF, DESCRIÇÃO, LINHA, [GTIN], [COMPONENTE], [TAMANHO], [COR], [SEÇÃO] (name of a registered section).
+     * LINHA accepts one or more lines separated by comma (e.g. "QUADRIL, JOELHO, OMBRO") and replaces
+     * the current lines; it may be empty only for materials that already have lines.
+     */
     @Transactional
     public ImportResultDTO materials(MultipartFile file) {
         accessControlService.requireManager();
@@ -95,6 +110,20 @@ public class ImportService {
                         .ifPresent(other -> { throw new IllegalArgumentException("GTIN " + gtin + " already belongs to REF " + other.getRef()); });
                 m.setGtin(gtin);
             }
+            String linesText = text(row, col.get("LINHA"));
+            if (!linesText.isBlank()) {
+                var lines = com.project.mss.model.enums.ProductLine.fromLabels(linesText);
+                m.getProductLines().clear();
+                m.getProductLines().addAll(lines);
+            }
+            if (m.getProductLines().isEmpty()) {
+                throw new IllegalArgumentException("LINHA is required (QUADRIL, JOELHO and/or OMBRO)");
+            }
+            String sectionText = text(row, col.get("SECAO")).trim();
+            if (!sectionText.isBlank()) {
+                m.setSection(productSectionRepository.findByNameIgnoreCase(sectionText.replaceAll("\\s+", " "))
+                        .orElseThrow(() -> new IllegalArgumentException("section " + sectionText + " is not registered")));
+            }
             String comp = text(row, col.get("COMPONENTE"));
             if (!comp.isBlank()) m.setComponent(comp.trim());
             String size = text(row, col.get("TAMANHO"));
@@ -108,12 +137,18 @@ public class ImportService {
 
     // ============================================================ prices
 
-    /** Hospital table: REF in column A and value in column B. Rows without a numeric value are skipped. */
+    /**
+     * Hospital table: REF in column A and value in column B. Rows without a numeric value are skipped.
+     * UPDATE creates or changes only the REFs in the spreadsheet. REPLACE treats the spreadsheet as the
+     * complete table: values of REFs not in it are removed. REPLACE is all-or-nothing: if any row has an
+     * error, nothing is saved, so a partial spreadsheet never wipes valid values.
+     */
     @Transactional
-    public ImportResultDTO prices(Long hospitalId, MultipartFile file, boolean createNewRefs) {
+    public ImportResultDTO prices(Long hospitalId, MultipartFile file, PriceImportMode mode, boolean createNewRefs) {
         accessControlService.requireManager();
         Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         List<String> errors = new ArrayList<>();
+        Set<Long> imported = new HashSet<>();
         int read = 0, ok = 0, ignored = 0;
 
         try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
@@ -131,10 +166,22 @@ public class ImportService {
                 }
                 Material m = material.orElseGet(() -> materialService.getOrCreate(ref, null));
                 materialService.setPrice(hospital, m, value.setScale(2, RoundingMode.HALF_UP));
+                imported.add(m.getId());
                 ok++;
             }
         } catch (IOException e) {
             throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        if (mode == PriceImportMode.REPLACE) {
+            if (!errors.isEmpty()) {
+                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+                errors.add(0, "Complete table not applied: fix the rows below and import again");
+                return new ImportResultDTO(read, 0, read, errors);
+            }
+            if (imported.isEmpty()) {
+                throw new BusinessRuleException("The spreadsheet has no valid rows; the current table was kept");
+            }
+            materialService.removePricesExcept(hospital, imported);
         }
         return new ImportResultDTO(read, ok, ignored, errors);
     }
@@ -166,7 +213,11 @@ public class ImportService {
                 String n = normalize(localTxt);
                 local = n.startsWith("SALA") || n.startsWith("STOREROOM") ? Location.STOREROOM : Location.HOSPITAL;
             }
+            if (local == null && hospital.isDistributionCenter()) local = Location.STOREROOM;
             if (local == null) throw new IllegalArgumentException("location not provided (SALA/STOREROOM or HOSPITAL)");
+            if (hospital.isDistributionCenter() && local == Location.HOSPITAL) {
+                throw new IllegalArgumentException("a distribution center only keeps material in the storeroom (SALA)");
+            }
 
             Material m = materialService.getOrCreate(ref, text(row, col.getOrDefault("DESCRICAO", col.get("MATERIAL"))));
             materialService.assignGtinIfMissing(m, text(row, col.get("GTIN")));
@@ -184,6 +235,69 @@ public class ImportService {
         });
     }
 
+    // ============================================================ stock entry (review before saving)
+
+    /**
+     * Reads a stock entry spreadsheet WITHOUT saving anything, so the rows can be reviewed on screen first.
+     * Columns: REF, LOTE, VALIDADE, QUANTIDADE, [DESCRIÇÃO], [GTIN].
+     * A REF that is not in the catalog comes back without materialId (it can be registered on screen);
+     * rows that cannot be used as they are (missing lot, invalid date or quantity, expired lot) come back with the error.
+     */
+    @Transactional(readOnly = true)
+    public List<EntryPreviewRowDTO> stockEntryPreview(MultipartFile file) {
+        accessControlService.requireManager();
+        String[] required = {"REF", "LOTE", "VALIDADE", "QUANTIDADE"};
+        LocalDate today = LocalDate.now();
+        List<EntryPreviewRowDTO> rows = new ArrayList<>();
+        try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
+            Sheet sh = wb.getSheetAt(0);
+            Map<String, Integer> col = null;
+            for (Row row : sh) {
+                if (col == null) {
+                    Map<String, Integer> c = mapHeader(row);
+                    if (c.keySet().containsAll(List.of(required))) col = c;
+                    continue;
+                }
+                String ref = text(row, col.get("REF")).trim().toUpperCase();
+                String lot = text(row, col.get("LOTE")).trim().toUpperCase();
+                if (ref.isBlank() && lot.isBlank()) continue;
+
+                String description = text(row, col.getOrDefault("DESCRICAO", col.get("MATERIAL")));
+                String gtin = MaterialService.normalizeGtin(text(row, col.get("GTIN")));
+                Long materialId = null;
+                LocalDate expiryDate = null;
+                Integer quantity = null;
+                String error = null;
+                try {
+                    if (ref.isBlank() || lot.isBlank()) throw new IllegalArgumentException("REF and lot are required");
+                    Optional<Material> material = materialRepository.findByRefIgnoreCase(ref);
+                    if (material.isPresent()) {
+                        materialId = material.get().getId();
+                        description = material.get().getDescription();
+                    }
+                    expiryDate = date(row, col.get("VALIDADE"));
+                    if (expiryDate == null) throw new IllegalArgumentException("expiry date is required");
+                    BigDecimal qty = number(row, col.get("QUANTIDADE"));
+                    if (qty == null || qty.signum() <= 0 || qty.stripTrailingZeros().scale() > 0) {
+                        throw new IllegalArgumentException("invalid quantity");
+                    }
+                    quantity = qty.intValue();
+                    if (expiryDate.isBefore(today)) throw new IllegalArgumentException("expired lot");
+                } catch (IllegalArgumentException e) {
+                    error = e.getMessage();
+                }
+                rows.add(new EntryPreviewRowDTO(row.getRowNum() + 1, ref, materialId, description, gtin, lot,
+                        expiryDate, quantity, error));
+            }
+            if (col == null) {
+                throw new BusinessRuleException("Header not found. Required columns: " + String.join(", ", required));
+            }
+        } catch (IOException e) {
+            throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        return rows;
+    }
+
     // ============================================================ minimums
 
     /** Colunas: REF, IDEAL, IDEAL TOTAL. */
@@ -197,8 +311,10 @@ public class ImportService {
             BigDecimal ideal = number(row, col.get("IDEAL"));
             BigDecimal idealTotal = number(row, col.get("IDEALTOTAL"));
             if (ideal == null || idealTotal == null) throw new IllegalArgumentException("IDEAL and IDEAL TOTAL are required");
-            if (idealTotal.intValue() < ideal.intValue()) {
-                throw new IllegalArgumentException("IDEAL TOTAL is lower than the hospital IDEAL");
+            try {
+                MinimumStockService.validate(hospital, ideal.intValue(), idealTotal.intValue());
+            } catch (BusinessRuleException e) {
+                throw new IllegalArgumentException(e.getMessage());
             }
             Material m = materialRepository.findByRefIgnoreCase(ref)
                     .orElseThrow(() -> new IllegalArgumentException("REF " + ref + " is not registered"));
@@ -214,6 +330,74 @@ public class ImportService {
             minimumStockRepository.save(min);
             return true;
         });
+    }
+
+    /**
+     * Reads a minimums spreadsheet WITHOUT saving (columns REF, IDEAL, IDEAL TOTAL), so the rows can be reviewed
+     * on screen and then applied through PATCH /hospitals/{id}/minimums.
+     */
+    @Transactional(readOnly = true)
+    public List<MinimumPreviewRowDTO> minimumsPreview(Long hospitalId, MultipartFile file) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
+        String[] required = {"REF", "IDEAL", "IDEALTOTAL"};
+        Map<Long, MinimumStock> current = new HashMap<>();
+        minimumStockRepository.listByHospital(hospitalId).forEach(min -> current.put(min.getMaterial().getId(), min));
+        List<MinimumPreviewRowDTO> rows = new ArrayList<>();
+        try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
+            Sheet sh = wb.getSheetAt(0);
+            Map<String, Integer> col = null;
+            for (Row row : sh) {
+                if (col == null) {
+                    Map<String, Integer> c = mapHeader(row);
+                    if (c.keySet().containsAll(List.of(required))) col = c;
+                    continue;
+                }
+                String ref = text(row, col.get("REF")).trim().toUpperCase();
+                if (ref.isBlank()) continue;
+                Long materialId = null;
+                String description = null;
+                Integer ideal = null;
+                Integer idealTotal = null;
+                int currentIdeal = 0;
+                int currentTotal = 0;
+                String error = null;
+                try {
+                    Optional<Material> m = materialRepository.findByRefIgnoreCase(ref);
+                    if (m.isEmpty()) throw new IllegalArgumentException("REF " + ref + " is not registered");
+                    materialId = m.get().getId();
+                    description = m.get().getDescription();
+                    MinimumStock min = current.get(materialId);
+                    if (min != null) {
+                        currentIdeal = min.getHospitalIdeal();
+                        currentTotal = min.getIdealTotal();
+                    }
+                    BigDecimal i = number(row, col.get("IDEAL"));
+                    BigDecimal t = number(row, col.get("IDEALTOTAL"));
+                    if (i == null || t == null) throw new IllegalArgumentException("IDEAL and IDEAL TOTAL are required");
+                    if (i.stripTrailingZeros().scale() > 0 || t.stripTrailingZeros().scale() > 0) {
+                        throw new IllegalArgumentException("levels must be whole numbers");
+                    }
+                    ideal = i.intValue();
+                    idealTotal = t.intValue();
+                    try {
+                        MinimumStockService.validate(hospital, ideal, idealTotal);
+                    } catch (BusinessRuleException e) {
+                        throw new IllegalArgumentException(e.getMessage());
+                    }
+                } catch (IllegalArgumentException e) {
+                    error = e.getMessage();
+                }
+                rows.add(new MinimumPreviewRowDTO(row.getRowNum() + 1, ref, materialId, description, ideal, idealTotal,
+                        currentIdeal, currentTotal, error));
+            }
+            if (col == null) {
+                throw new BusinessRuleException("Header not found. Required columns: REF, IDEAL, IDEAL TOTAL");
+            }
+        } catch (IOException e) {
+            throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        return rows;
     }
 
     // ============================================================ generic engine
@@ -273,6 +457,8 @@ public class ImportService {
                 case "MATERIAL", "PRODUTO", "ITEM" -> "MATERIAL";
                 case "LOCAL", "LOCALIZACAO", "ONDE" -> "LOCAL";
                 case "GTIN", "EAN", "CODIGODEBARRAS", "CODIGOBARRAS" -> "GTIN";
+                case "LINHA", "LINHAS", "LINE", "LINES" -> "LINHA";
+                case "SECAO", "SECOES", "SECTION", "GRUPO" -> "SECAO";
                 case "IDEAL", "IDEALHOSPITAL", "MINIMO", "MINIMOHOSPITAL" -> "IDEAL";
                 case "IDEALTOTAL", "TOTALIDEAL", "MINIMOTOTAL" -> "IDEALTOTAL";
                 default -> n;

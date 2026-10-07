@@ -1,5 +1,6 @@
 package com.project.mss.controller;
 
+import org.springdoc.core.annotations.ParameterObject;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -12,6 +13,9 @@ import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.stock.StockAdjustmentDTO;
 import com.project.mss.dto.stock.StockEntryDTO;
+import com.project.mss.dto.stock.LotStockDTO;
+import com.project.mss.dto.stock.StockSummaryDTO;
+import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.stock.StockMovementDTO;
 import com.project.mss.service.StockService;
@@ -41,6 +45,36 @@ public class StockController {
         return stockService.hospitalView(hospitalId, includeExpired);
     }
 
+    @GetMapping("/summary")
+    @Operation(summary = "Stock summary of a hospital, without lots (surgical tech's view)",
+               description = "Per material: quantity inside the hospital (storeroom excluded), valid lots only, "
+                       + "with product lines for grouping.")
+    public List<StockSummaryDTO> summary(@RequestParam Long hospitalId) {
+        return stockService.hospitalSummary(hospitalId);
+    }
+
+    @GetMapping("/lots")
+    @Operation(summary = "Stock by lot and hospital (administrators and read-only users; not surgical techs)",
+               description = "Without hospitalId, searches every hospital the user can see (locates a lot anywhere). term matches lot "
+                       + "number, REF, name, description or GTIN. Sorted by REF, expiry date and hospital. Paginated.")
+    public Page<LotStockDTO> lots(@RequestParam(required = false) String term,
+                                  @RequestParam(required = false) Long hospitalId,
+                                  @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
+        return stockService.searchLots(term, hospitalId, pageable);
+    }
+
+    @GetMapping("/material")
+    @Operation(summary = "Stock of the materials matching a REF, name or description, per hospital and lot",
+               description = "Partial match: '1032' returns every REF containing 1032; empty returns the whole catalog. "
+                       + "Without hospitalId, returns every hospital visible to the user (useful for audits). "
+                       + "Totals ignore expired lots. Paginated by material.")
+    public Page<MaterialStockDTO> materialStock(@RequestParam(required = false) String term,
+                                                @RequestParam(required = false) Long hospitalId,
+                                                @RequestParam(defaultValue = "false") boolean includeExpired,
+                                                @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
+        return stockService.materialStock(term, hospitalId, includeExpired, pageable);
+    }
+
     @GetMapping("/hospital/{hospitalId}/xlsx")
     @Operation(summary = "Download the hospital stock as Excel, with size colors")
     public ResponseEntity<byte[]> spreadsheet(@PathVariable Long hospitalId) {
@@ -52,7 +86,7 @@ public class StockController {
     public Page<StockMovementDTO> history(@PathVariable Long hospitalId,
                                            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
                                            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-                                           @PageableDefault(size = 50) Pageable pageable) {
+                                           @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
         return stockService.history(hospitalId, start, end, pageable);
     }
 

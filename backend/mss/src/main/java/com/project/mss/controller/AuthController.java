@@ -1,23 +1,14 @@
 package com.project.mss.controller;
 
-import java.util.List;
-
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import com.project.mss.config.SessionCookies;
 import com.project.mss.dto.user.LoginDTO;
-import com.project.mss.dto.user.UserRegDTO;
-import com.project.mss.dto.user.UserResponseDTO;
+import com.project.mss.dto.user.PasswordResetDTO;
+import com.project.mss.dto.user.PasswordResetRequestDTO;
+import com.project.mss.dto.user.UserDTO;
 import com.project.mss.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -26,81 +17,55 @@ import jakarta.validation.Valid;
 
 @RestController
 @RequestMapping("/auth")
-@Tag(name = "Authentication",description = "User authentication and registration endpoints")
+@Tag(name = "Authentication", description = "Session (login/logout), first access and password reset")
 public class AuthController {
 
     private final UserService userService;
+    private final SessionCookies sessionCookies;
 
-    public AuthController(UserService userService) {
+    public AuthController(UserService userService, SessionCookies sessionCookies) {
         this.userService = userService;
+        this.sessionCookies = sessionCookies;
     }
 
-    @PostMapping("/login")
-    @Operation(summary = "User login", description = "Authenticates a user.")
-    public ResponseEntity<Object> login(@RequestBody @Valid LoginDTO login) {
+    @PostMapping("/session")
+    @Operation(summary = "Log in with e-mail and password",
+               description = "rememberMe=true keeps the session on this device for 7 days; otherwise it ends "
+                       + "after 30 minutes without use or when the browser is closed.")
+    public ResponseEntity<UserDTO> login(@RequestBody @Valid LoginDTO login) {
         String token = userService.login(login);
-        
-        ResponseCookie cookie = ResponseCookie.from("accessToken", token)
-                .httpOnly(true)
-                .secure(false)
-                .path("/")
-                .maxAge(24 * 60 * 60)
-                .sameSite("Strict")
-                .build();
-        
         return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(java.util.Map.of("message", "Login successful"));
-    }
-
-    @PostMapping("/register")
-    @Operation(summary = "User registration", description = "Registers a new user (ADMIN/MASTER only).")
-    public ResponseEntity<String> register(@RequestBody @Valid UserRegDTO newUser) {
-        userService.register(newUser);
-        return ResponseEntity.status(HttpStatus.CREATED).body("User registered successfully");
-    }
-
-    @PostMapping("/logout")
-    @Operation(summary = "Logout", description = "Clears the access cookie.")
-    public ResponseEntity<String> logout() {
-        ResponseCookie cookie = ResponseCookie.from("accessToken", "") 
-                .httpOnly(true)
-                .secure(false)
-                .path("/")
-                .maxAge(0)
-                .sameSite("Strict")
-                .build();
-
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body("Logout successful");
+                .header(HttpHeaders.SET_COOKIE, sessionCookies.create(token, login.rememberMe()).toString())
+                .body(userService.findByToken(token));
     }
 
     @GetMapping("/session")
-    @Operation(summary = "Get current user", description = "Returns the logged-in user based on the cookie.")
-    public ResponseEntity<UserResponseDTO> getCurrentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    @Operation(summary = "Current session user")
+    public UserDTO session() {
+        return userService.me();
+    }
 
-        if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
-            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            
-            var userEntity = userService.findUserDTOByUsername(userDetails.getUsername()); 
-            
-            List<String> roles = userEntity.getAuthorities().stream()
-                    .map(authority -> authority.getAuthority())
-                    .toList();
+    @DeleteMapping("/session")
+    @Operation(summary = "Log out (clears the session cookie)")
+    public ResponseEntity<Void> logout() {
+        return ResponseEntity.noContent()
+                .header(HttpHeaders.SET_COOKIE, sessionCookies.clear().toString())
+                .build();
+    }
 
-            UserResponseDTO userDTO = new UserResponseDTO(
-                userEntity.getId(),
-                userEntity.getUsername(),
-                userEntity.getEmail(),
-                userEntity.isEnabled(),
-                roles
-            );
-            
-            return ResponseEntity.ok(userDTO);
-        }
-        
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+    @PostMapping("/password-reset-requests")
+    @Operation(summary = "Request a password reset link by e-mail",
+               description = "Always returns success, whether the e-mail is registered or not. "
+                       + "Users who have not completed the first access receive a new invitation.")
+    public ResponseEntity<Void> requestPasswordReset(@RequestBody @Valid PasswordResetRequestDTO dto) {
+        userService.requestPasswordReset(dto);
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/password-resets")
+    @Operation(summary = "Create the password from an e-mail link (first access or password reset)")
+    public ResponseEntity<Void> resetPassword(@RequestBody @Valid PasswordResetDTO dto) {
+        userService.resetPassword(dto);
+        return ResponseEntity.noContent().build();
     }
 }

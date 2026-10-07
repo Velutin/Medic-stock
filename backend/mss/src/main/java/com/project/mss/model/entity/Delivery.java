@@ -25,6 +25,11 @@ public class Delivery {
     @JoinColumn(name = "hospital_id")
     private Hospital hospital;
 
+    /** Distribution center the material came from (null = the hospital's own storeroom). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_hospital_id")
+    private Hospital sourceHospital;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
 

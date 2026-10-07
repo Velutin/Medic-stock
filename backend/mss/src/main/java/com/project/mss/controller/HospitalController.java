@@ -6,12 +6,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.project.mss.dto.hospital.CoveredHospitalsDTO;
 import com.project.mss.dto.hospital.HospitalDTO;
 import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.PriceDTO;
-import com.project.mss.dto.hospital.UserHospitalsDTO;
+import com.project.mss.dto.hospital.PriceFormDTO;
+import com.project.mss.dto.replenishment.ReplenishmentSuggestionDTO;
+import com.project.mss.dto.replenishment.StockLevelDTO;
 import com.project.mss.service.HospitalService;
 import com.project.mss.service.MaterialService;
+import com.project.mss.service.ReplenishmentService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -24,16 +28,20 @@ public class HospitalController {
 
     private final HospitalService hospitalService;
     private final MaterialService materialService;
+    private final ReplenishmentService replenishmentService;
 
-    public HospitalController(HospitalService hospitalService, MaterialService materialService) {
+    public HospitalController(HospitalService hospitalService, MaterialService materialService,
+                              ReplenishmentService replenishmentService) {
         this.hospitalService = hospitalService;
         this.materialService = materialService;
+        this.replenishmentService = replenishmentService;
     }
 
     @GetMapping
-    @Operation(summary = "Hospitals visible to the logged-in user")
-    public List<HospitalDTO> list() {
-        return hospitalService.listVisible();
+    @Operation(summary = "Hospitals visible to the logged-in user",
+               description = "includeInactive=true (ADMIN) also lists inactive hospitals, for the registry screen.")
+    public List<HospitalDTO> list(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return hospitalService.listVisible(includeInactive);
     }
 
     @GetMapping("/{id}")
@@ -42,7 +50,7 @@ public class HospitalController {
     }
 
     @PostMapping
-    @Operation(summary = "Cadastrar hospital (ADMIN)")
+    @Operation(summary = "Create hospital (ADMIN)")
     public ResponseEntity<HospitalDTO> create(@RequestBody @Valid HospitalFormDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(hospitalService.create(dto));
     }
@@ -54,15 +62,41 @@ public class HospitalController {
     }
 
     @GetMapping("/{id}/prices")
-    @Operation(summary = "Hospital price table")
+    @Operation(summary = "Hospital price table (ADMIN)")
     public List<PriceDTO> prices(@PathVariable Long id) {
         return materialService.hospitalTable(id);
     }
 
-    @PutMapping("/users")
-    @Operation(summary = "Set which hospitals a user works at (ADMIN)")
-    public ResponseEntity<String> setUserHospitals(@RequestBody @Valid UserHospitalsDTO dto) {
-        hospitalService.setUserHospitals(dto);
-        return ResponseEntity.ok("User hospitals updated");
+    @PutMapping("/{id}/prices/{materialId}")
+    @Operation(summary = "Create or change the value of a REF in the hospital table (ADMIN)",
+               description = "Surgery items recorded without value for this REF receive it automatically; "
+                       + "items that already had a value keep it.")
+    public PriceDTO putPrice(@PathVariable Long id, @PathVariable Long materialId,
+                             @RequestBody @Valid PriceFormDTO dto) {
+        return materialService.putPrice(id, materialId, dto.value());
     }
+
+    @GetMapping("/{id}/replenishment-suggestions")
+    @Operation(summary = "What to replenish from the storeroom and what to order from the supplier (ADMIN)",
+               description = "Expired lots are ignored. onlyWithShortage=false also lists materials at their ideal level.")
+    public List<ReplenishmentSuggestionDTO> replenishmentSuggestions(@PathVariable Long id,
+                                                                     @RequestParam(defaultValue = "true") boolean onlyWithShortage) {
+        return replenishmentService.suggestion(id, onlyWithShortage);
+    }
+
+    @GetMapping("/{id}/stock-levels")
+    @Operation(summary = "Minimum levels and valid balances of every REF the hospital may work with (ADMIN)",
+               description = "Catalog items of the hospital product lines, REFs with minimum levels and REFs with balance. "
+                       + "For a distribution center, the balance inside is the stock in the hospitals it supplies.")
+    public List<StockLevelDTO> stockLevels(@PathVariable Long id) {
+        return replenishmentService.levels(id);
+    }
+
+    @PutMapping("/{id}/covered-hospitals")
+    @Operation(summary = "Set the hospitals supplied by a distribution center (ADMIN)",
+               description = "A hospital can belong to only one distribution center. An empty list removes every hospital.")
+    public HospitalDTO setCoveredHospitals(@PathVariable Long id, @RequestBody @Valid CoveredHospitalsDTO dto) {
+        return hospitalService.setCoveredHospitals(id, dto);
+    }
+
 }
