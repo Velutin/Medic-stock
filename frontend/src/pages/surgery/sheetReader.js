@@ -13,14 +13,10 @@
  */
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
-import zxingWasmUrl from 'zxing-wasm/reader/zxing_reader.wasm?url';
+// The WASM reader is set up once in utils/zxingReader, shared with the camera reader.
+import { readBarcodes } from '../../utils/zxingReader';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-// The .wasm file is served by the application itself (no external CDN)
-prepareZXingModule({
-  overrides: { locateFile: (path, prefix) => (path.endsWith('.wasm') ? zxingWasmUrl : prefix + path) },
-});
 
 const OPTIONS = {
   tryHarder: true, tryRotate: true, tryDownscale: true, maxNumberOfSymbols: 255,

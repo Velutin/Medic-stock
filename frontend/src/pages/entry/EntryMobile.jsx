@@ -98,7 +98,14 @@ export default function EntryMobile({ entry }) {
         onChange={(e) => setField('entryDate', e.target.value)} InputLabelProps={{ shrink: true }}
         inputProps={{ max: todayIso() }} />
 
-      <CodeReader onCode={onCode} busy={reader.reading || newItemOpen || Boolean(entry.refConflict)}
+      {/*
+        The camera stops reading once an item is on screen waiting to be typed (lot, expiry date, quantity):
+        with the barcode labels the expiry date is typed by hand, and any code entering the frame meanwhile
+        would be taken as a new product and would replace what had already been filled in. While the lot
+        barcode is still expected the camera keeps reading, because that reading is the next step.
+      */}
+      <CodeReader onCode={onCode}
+        busy={reader.reading || newItemOpen || Boolean(entry.refConflict) || (hasRead && !reader.awaitingLot)}
         typedLabel={reader.awaitingLot ? 'Código do lote' : 'Código ou REF'} />
 
       {hasRead && (
@@ -139,6 +146,12 @@ export default function EntryMobile({ entry }) {
                 Adicionar
               </Button>
             </Box>
+            {!reader.awaitingLot && (
+              <Typography variant="caption" color="text.secondary">
+                A câmera está pausada para não perder o que você digitou. Ela volta a ler assim que você
+                adicionar ou descartar este item.
+              </Typography>
+            )}
           </Stack>
         </Paper>
       )}
