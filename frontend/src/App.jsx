@@ -12,6 +12,11 @@ import RegistryPage from './pages/registry/RegistryPage';
 import EntryPage from './pages/entry/EntryPage';
 import TransferPage from './pages/transfer/TransferPage';
 import SurgeryPage from './pages/surgery/SurgeryPage';
+import ReplenishmentPage from './pages/replenishment/ReplenishmentPage';
+import LoanPage from './pages/loan/LoanPage';
+import BillingPage from './pages/billing/BillingPage';
+import ReportsPage from './pages/reports/ReportsPage';
+import DashboardPage from './pages/dashboard/DashboardPage';
 import ComingSoon from './pages/ComingSoon';
 
 /** Screens already connected to the API; the other menu items show a placeholder until their phase. */
@@ -22,6 +27,11 @@ const PAGES = {
   '/entrada': <EntryPage />,
   '/transferencia': <TransferPage />,
   '/saida': <SurgeryPage />,
+  '/reposicao': <ReplenishmentPage />,
+  '/emprestimos': <LoanPage />,
+  '/faturamento': <BillingPage />,
+  '/relatorios': <ReportsPage />,
+  '/painel': <DashboardPage />,
 };
 
 function Home() {

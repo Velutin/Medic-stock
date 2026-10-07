@@ -131,7 +131,7 @@ export default function EntryDesktop({ entry }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); expiryInput.current?.focus(); } }}
                 error={Boolean(errors.lot)} helperText={errors.lot} />
               <ExpiryField label="Validade (mês/ano)" value={item.expiryDate} required inputRef={expiryInput}
-                onChange={(v) => reader.set('expiryDate', v)}
+                onChange={reader.setExpiry}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); quantityInput.current?.focus(); } }}
                 error={Boolean(errors.expiryDate)} helperText={errors.expiryDate} />
               <TextField type="number" label="Qtd." value={item.quantity} inputRef={quantityInput}

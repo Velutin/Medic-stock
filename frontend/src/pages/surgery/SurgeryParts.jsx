@@ -180,6 +180,7 @@ export function SurgeryTotal({ surgery, showValues }) {
 /** Why the surgery cannot be completed yet, or null. */
 export function completeBlocker(surgery) {
   if (!surgery) return 'Preencha a cirurgia e lance os itens.';
+  if (surgery.status === 'COMPLETED') return 'Cirurgia já concluída: as alterações de itens são gravadas na hora.';
   if (!surgery.items?.length) return 'Lance ao menos um item.';
   if (!surgery.hasSheet) return 'Anexe a ficha da cirurgia (obrigatória).';
   if ((surgery.pendingIssues || []).some((p) => p.status === 'OPEN')) return 'Há pendências para o administrador resolver.';

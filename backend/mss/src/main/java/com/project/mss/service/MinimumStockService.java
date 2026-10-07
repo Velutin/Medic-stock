@@ -1,10 +1,13 @@
 package com.project.mss.service;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.replenishment.MinimumStockBatchDTO;
 import com.project.mss.dto.replenishment.MinimumStockDTO;
 import com.project.mss.dto.replenishment.MinimumStockFormDTO;
 import com.project.mss.dto.replenishment.MinimumStockPatchDTO;
@@ -59,6 +62,44 @@ public class MinimumStockService {
                 });
         apply(min, hospital, dto.hospitalIdeal(), dto.idealTotal());
         return MinimumStockDTO.of(minimumStockRepository.save(min));
+    }
+
+    /**
+     * Creates, replaces or removes (both levels 0) several REFs at once. All rows are validated before anything is
+     * saved: one invalid row rejects the whole change.
+     */
+    @Transactional
+    public List<MinimumStockDTO> batch(Long hospitalId, MinimumStockBatchDTO dto) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
+        Map<Long, Material> materials = new HashMap<>();
+        for (MinimumStockBatchDTO.Item item : dto.items()) {
+            Material material = materialRepository.findById(item.materialId())
+                    .orElseThrow(() -> new EntityNotFoundException("Material " + item.materialId() + " not found"));
+            try {
+                validate(hospital, item.hospitalIdeal(), item.idealTotal());
+            } catch (BusinessRuleException e) {
+                throw new BusinessRuleException("REF " + material.getRef() + ": " + e.getMessage());
+            }
+            materials.put(item.materialId(), material);
+        }
+        for (MinimumStockBatchDTO.Item item : dto.items()) {
+            var current = minimumStockRepository.findByHospitalIdAndMaterialId(hospitalId, item.materialId());
+            if (item.hospitalIdeal() == 0 && item.idealTotal() == 0) {
+                current.ifPresent(minimumStockRepository::delete);
+                continue;
+            }
+            MinimumStock min = current.orElseGet(() -> {
+                MinimumStock created = new MinimumStock();
+                created.setHospital(hospital);
+                created.setMaterial(materials.get(item.materialId()));
+                return created;
+            });
+            apply(min, hospital, item.hospitalIdeal(), item.idealTotal());
+            minimumStockRepository.save(min);
+        }
+        minimumStockRepository.flush();
+        return minimumStockRepository.listByHospital(hospitalId).stream().map(MinimumStockDTO::of).toList();
     }
 
     /** Changes only the informed levels of an existing REF in the list. */

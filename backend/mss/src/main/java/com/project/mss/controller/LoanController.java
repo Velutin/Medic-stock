@@ -8,10 +8,9 @@ import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.loan.LoanDTO;
 import com.project.mss.dto.loan.LoanFormDTO;
-import com.project.mss.model.enums.LoanStatus;
+import com.project.mss.model.enums.LoanType;
 import com.project.mss.service.LoanService;
 import com.project.mss.service.ReportService;
-import com.project.mss.dto.loan.LoanStatusUpdateDTO;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,26 +30,23 @@ public class LoanController {
     }
 
     @PostMapping
-    @Operation(summary = "Record a loan (debits the source and credits the destination hospital)")
+    @Operation(summary = "Record a loan or a return to the supplier",
+               description = "LOAN (default): debits the source and credits the destination hospital. RETURN: debits the "
+                       + "source only (the material goes back to the supplier); returnReason is required, expired lots are accepted "
+                       + "and the return has its own PDF.")
     public ResponseEntity<LoanDTO> create(@RequestBody @Valid LoanFormDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(loanService.create(dto));
     }
 
     @GetMapping
-    @Operation(summary = "List loans (use status=PENDING_NOTIFICATION to see what still has to be reported to the supplier)")
-    public List<LoanDTO> list(@RequestParam(required = false) LoanStatus status) {
-        return loanService.list(status);
-    }
-
-    @PatchMapping("/{id}")
-    @Operation(summary = "Change the loan status (ADMIN)",
-               description = "Use NOTIFIED once the supplier has been informed about the loan.")
-    public LoanDTO updateStatus(@PathVariable Long id, @RequestBody @Valid LoanStatusUpdateDTO dto) {
-        return loanService.updateStatus(id, dto);
+    @Operation(summary = "Latest 50 loans and returns (type=LOAN or RETURN to filter)")
+    public List<LoanDTO> list(@RequestParam(required = false) LoanType type) {
+        return loanService.list(type);
     }
 
     @GetMapping("/{id}/pdf")
+    @Operation(summary = "Loan PDF (printed as a delivery to the destination hospital) or, for type RETURN, the return PDF")
     public ResponseEntity<byte[]> pdf(@PathVariable Long id) {
-        return FileResponses.pdf(reportService.loanPdf(id), "loan-" + id + ".pdf", true);
+        return FileResponses.pdf(reportService.loanPdf(id), "entrega-E-" + id + ".pdf", true);
     }
 }

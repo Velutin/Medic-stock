@@ -30,7 +30,7 @@ public class BillingController {
     @GetMapping("/billing")
     @Operation(summary = "Billing of completed surgeries",
                description = "months: one or more months in yyyy-MM (e.g. months=2026-09&months=2026-10); "
-                       + "default: current month. Surgeries count in the month they were completed. "
+                       + "default: current month. Completed surgeries count in the month of the surgery date. "
                        + "Without hospitalId: every hospital.")
     public BillingDTO billing(@RequestParam(required = false) List<String> months,
                               @RequestParam(required = false) Long hospitalId) {

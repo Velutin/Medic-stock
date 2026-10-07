@@ -36,17 +36,17 @@ public interface SurgeryRepository extends JpaRepository<Surgery, Long> {
     List<Object[]> countByHospital(@Param("hospitalIds") Collection<Long> hospitalIds,
                                    @Param("start") LocalDate start, @Param("end") LocalDate end);
 
-    /** Completed surgeries of the given hospitals completed in [start, end). */
+    /** Completed surgeries of the given hospitals whose surgery date is in [start, end]. */
     @Query("""
            SELECT c FROM Surgery c JOIN FETCH c.hospital LEFT JOIN FETCH c.surgicalTech
            WHERE c.status = com.project.mss.model.enums.SurgeryStatus.COMPLETED
              AND c.hospital.id IN :hospitalIds
-             AND c.completedAt >= :start AND c.completedAt < :end
-           ORDER BY c.completedAt, c.id
+             AND c.surgeryDate BETWEEN :start AND :end
+           ORDER BY c.surgeryDate, c.id
            """)
     List<Surgery> listCompleted(@Param("hospitalIds") Collection<Long> hospitalIds,
-                                @Param("start") java.time.LocalDateTime start,
-                                @Param("end") java.time.LocalDateTime end);
+                                @Param("start") LocalDate start,
+                                @Param("end") LocalDate end);
 
     @Query("""
            SELECT c FROM Surgery c LEFT JOIN FETCH c.surgicalTech
@@ -55,4 +55,15 @@ public interface SurgeryRepository extends JpaRepository<Surgery, Long> {
     List<Surgery> listByPeriod(@Param("start") LocalDate start,
                                     @Param("end") LocalDate end,
                                     @Param("status") Collection<SurgeryStatus> status);
+
+    /** Surgeries of the given hospitals and statuses with the surgery date in [start, end] (reports). */
+    @Query("""
+           SELECT c FROM Surgery c JOIN FETCH c.hospital
+           WHERE c.hospital.id IN :hospitalIds AND c.surgeryDate BETWEEN :start AND :end AND c.status IN :status
+           ORDER BY c.surgeryDate, c.id
+           """)
+    List<Surgery> listForReport(@Param("hospitalIds") Collection<Long> hospitalIds,
+                                @Param("start") LocalDate start,
+                                @Param("end") LocalDate end,
+                                @Param("status") Collection<SurgeryStatus> status);
 }

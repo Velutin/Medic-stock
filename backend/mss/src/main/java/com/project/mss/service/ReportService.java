@@ -67,8 +67,6 @@ public class ReportService {
 
     // ============================================================ PDFs
 
-    private static final String[] DELIVERY_COLUMNS = {"REF", "Material", "Lote", "Validade", "Qtd"};
-    private static final float[] DELIVERY_WIDTHS = {1.4f, 4.2f, 1.6f, 1.1f, 0.6f};
 
     /**
      * Hospital delivery report, Classic layout. The material column uses the short name
@@ -98,22 +96,44 @@ public class ReportService {
     @Transactional(readOnly = true)
     public byte[] loanPdf(Long loanId) {
         Loan e = loanService.load(loanId);
-        List<String[]> rows = e.getItems().stream()
-                .map(i -> new String[]{i.getLot().getMaterial().getRef(), i.getLot().getMaterial().getDescription(),
-                        i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()), String.valueOf(i.getQuantity())})
-                .toList();
-        String sourceName = e.getSourceHospital().getName()
-                + (e.getSourceLocation() == Location.STOREROOM ? " (material da sala)" : " (estoque do hospital)");
-        return pdfService.generate(new PdfService.Report(
-                "EMPRÉSTIMO DE MATERIAIS ENTRE HOSPITAIS",
-                List.of(new String[]{"Empréstimo nº:", String.valueOf(e.getId())},
-                        new String[]{"Origem:", sourceName},
-                        new String[]{"Destino:", e.getDestinationHospital().getName()},
-                        new String[]{"Data:", e.getCreatedAt().format(DATE_TIME)},
-                        new String[]{"Observação:", e.getNotes()}),
-                DELIVERY_COLUMNS, DELIVERY_WIDTHS, rows,
-                "Total de itens: " + e.getItems().stream().mapToInt(i -> i.getQuantity()).sum(),
-                new String[]{"Entregue por", "Recebido por (" + e.getDestinationHospital().getName() + ")"}));
+        if (e.getType() == com.project.mss.model.enums.LoanType.RETURN) return returnPdf(e);
+        // The hospital receives a loan as a regular delivery: loan details are internal to the system
+        return pdfService.classicReport(new PdfService.ClassicReport("ENTREGA DE MATERIAIS", "Entrega nº E-" + e.getId(),
+                List.of(new String[]{"HOSPITAL", e.getDestinationHospital().getName()},
+                        new String[]{"DATA DA ENTREGA", fmt(e.getCreatedAt().toLocalDate())},
+                        new String[]{"ENTREGUE POR", e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-"},
+                        new String[]{"TOTAL DE PEÇAS", String.valueOf(pieces(e))}),
+                new float[]{2.6f, 1.3f, 1.6f, 1.1f}, movementRows(e, false), pieces(e), null, null,
+                new String[]{"Entregue por", "Recebido por (nome legível e data)"}));
+    }
+
+    /** Return to the supplier: the items sent back to Baumer, to send to the company. */
+    private byte[] returnPdf(Loan e) {
+        return pdfService.classicReport(new PdfService.ClassicReport("DEVOLUÇÃO DE MATERIAIS", "Devolução nº " + e.getId(),
+                List.of(new String[]{"ORIGEM", sourceLabel(e)}, new String[]{"DESTINO", "Baumer"},
+                        new String[]{"DATA DA DEVOLUÇÃO", fmt(e.getCreatedAt().toLocalDate())},
+                        new String[]{"ENVIADO POR", e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-"}),
+                new float[]{2.2f, 1.1f, 1.4f, 1.6f, 1f}, movementRows(e, true), pieces(e), "Motivo", e.getReturnReason(),
+                new String[]{"Enviado por", "Recebido por Baumer (nome legível e data)"}));
+    }
+
+    /** REF, material (short name), lot, expiry date and quantity; returns flag the lots expired on the return date. */
+    private static List<String[]> movementRows(Loan e, boolean flagExpired) {
+        LocalDate day = e.getCreatedAt().toLocalDate();
+        return e.getItems().stream().map(i -> {
+            var m = i.getLot().getMaterial();
+            String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
+            String expiry = fmt(i.getLot().getExpiryDate()) + (flagExpired && i.getLot().isExpired(day) ? " (vencido)" : "");
+            return new String[]{m.getRef(), name, i.getLot().getNumber(), expiry, String.valueOf(i.getQuantity())};
+        }).toList();
+    }
+
+    private static String sourceLabel(Loan e) {
+        return e.getSourceHospital().getName() + (e.getSourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)");
+    }
+
+    private static int pieces(Loan e) {
+        return e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
     }
 
     /** Supplier order PDF. */

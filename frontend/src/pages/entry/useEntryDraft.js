@@ -54,7 +54,7 @@ export default function useEntryDraft() {
   const setField = useCallback((field, value) => setDraft((d) => ({ ...d, [field]: value })), []);
 
   /** Adds a lot; the same material + lot + expiry date already in the list is summed (as the API does). */
-  const addItem = useCallback(({ material, lot, expiryDate, quantity }) => {
+  const addItem = useCallback(({ material, lot, expiryDate, quantity, monthOnly = false }) => {
     const lotNumber = lot.trim().toUpperCase();
     const qty = Number(quantity);
     setDraft((d) => {
@@ -67,7 +67,7 @@ export default function useEntryDraft() {
         items: [...d.items, {
           key: nextKey++, materialId: material.id, ref: material.ref, description: material.description,
           component: material.component, size: material.size, color: material.color,
-          lot: lotNumber, expiryDate, quantity: qty,
+          lot: lotNumber, expiryDate, quantity: qty, monthOnly,
         }],
       };
     });
@@ -114,7 +114,9 @@ export default function useEntryDraft() {
       hospitalId: draft.hospitalId,
       entryDate: draft.entryDate,
       notes: draft.notes.trim() || null,
-      items: draft.items.map(({ materialId, lot, expiryDate, quantity }) => ({ materialId, lot, expiryDate, quantity })),
+      items: draft.items.map(({ materialId, lot, expiryDate, quantity, monthOnly }) => ({
+        materialId, lot, expiryDate, quantity, monthOnly: Boolean(monthOnly),
+      })),
     };
     setSaving(true);
     try {

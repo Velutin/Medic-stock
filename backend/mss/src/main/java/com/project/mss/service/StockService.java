@@ -105,6 +105,19 @@ public class StockService {
         return stockMovementRepository.save(m);
     }
 
+    /** Material returned to the supplier: leaves the hospital (or its storeroom) and enters no other stock. */
+    @Transactional
+    public StockMovement recordSupplierReturn(Lot lot, int quantity, Hospital hospital, Location location, Long loanId,
+                                              String notes) {
+        debit(lot, hospital, location, quantity);
+        StockMovement m = newMovement(MovementType.SUPPLIER_RETURN, lot, quantity);
+        m.setSourceHospital(hospital);
+        m.setSourceLocation(location);
+        m.setLoanId(loanId);
+        m.setNotes(notes.length() > 1000 ? notes.substring(0, 1000) : notes);
+        return stockMovementRepository.save(m);
+    }
+
     @Transactional
     public StockMovement recordSurgeryWithdrawal(Lot lot, int quantity, Hospital hospital, Long surgeryId) {
         debit(lot, hospital, Location.HOSPITAL, quantity);

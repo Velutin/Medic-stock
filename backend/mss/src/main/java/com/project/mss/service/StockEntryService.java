@@ -3,6 +3,7 @@ package com.project.mss.service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -25,6 +26,7 @@ import com.project.mss.model.entity.StockEntry;
 import com.project.mss.model.entity.StockEntryItem;
 import com.project.mss.model.enums.Location;
 import com.project.mss.repository.HospitalRepository;
+import com.project.mss.repository.LotRepository;
 import com.project.mss.repository.MaterialRepository;
 import com.project.mss.repository.StockEntryRepository;
 
@@ -61,16 +63,19 @@ public class StockEntryService {
     private final MaterialService materialService;
     private final StockService stockService;
     private final AccessControlService accessControlService;
+    private final LotRepository lotRepository;
 
     public StockEntryService(StockEntryRepository stockEntryRepository, HospitalRepository hospitalRepository,
                              MaterialRepository materialRepository, MaterialService materialService,
-                             StockService stockService, AccessControlService accessControlService) {
+                             StockService stockService, AccessControlService accessControlService,
+                             LotRepository lotRepository) {
         this.stockEntryRepository = stockEntryRepository;
         this.hospitalRepository = hospitalRepository;
         this.materialRepository = materialRepository;
         this.materialService = materialService;
         this.stockService = stockService;
         this.accessControlService = accessControlService;
+        this.lotRepository = lotRepository;
     }
 
     @Transactional
@@ -193,22 +198,42 @@ public class StockEntryService {
         return hospital;
     }
 
-    /** Finds or creates each lot, refuses expired ones and sums repeated lots. */
+    /**
+     * Finds or creates each lot, refuses expired ones and sums repeated lots. An expiry typed as MM/AAAA reuses the
+     * lot with the same number and expiry month (e.g. registered before from a QR code with the full date).
+     */
     private Map<Long, ResolvedItem> resolveItems(List<EntryFormDTO.Item> items) {
         LocalDate today = LocalDate.now();
         Map<Long, ResolvedItem> result = new LinkedHashMap<>();
         for (EntryFormDTO.Item item : items) {
             Material material = materialRepository.findById(item.materialId())
                     .orElseThrow(() -> new EntityNotFoundException("Material " + item.materialId() + " not found"));
-            if (item.expiryDate().isBefore(today)) {
+            String number = item.lot().trim().toUpperCase();
+            Lot lot = Boolean.TRUE.equals(item.monthOnly()) ? sameMonthLot(material, number, item.expiryDate()) : null;
+            LocalDate expiry = lot != null ? lot.getExpiryDate() : item.expiryDate();
+            if (expiry.isBefore(today)) {
                 throw new BusinessRuleException(String.format("Lot %s (REF %s) is expired and cannot be received",
-                        item.lot().trim().toUpperCase(), material.getRef()));
+                        number, material.getRef()));
             }
-            Lot lot = materialService.getOrCreateLot(material, item.lot(), item.expiryDate());
-            result.merge(lot.getId(), new ResolvedItem(lot, item.quantity()),
+            if (lot == null) lot = materialService.getOrCreateLot(material, item.lot(), item.expiryDate());
+            Lot resolved = lot;
+            result.merge(resolved.getId(), new ResolvedItem(resolved, item.quantity()),
                     (a, b) -> new ResolvedItem(a.lot(), a.quantity() + b.quantity()));
         }
         return result;
+    }
+
+    /** Existing lot of the material with this number and expiry month; null when there is none. */
+    private Lot sameMonthLot(Material material, String number, LocalDate expiry) {
+        YearMonth month = YearMonth.from(expiry);
+        List<Lot> sameMonth = lotRepository.findByMaterialIdAndNumberIgnoreCaseOrderByExpiryDateAsc(material.getId(), number)
+                .stream().filter(l -> YearMonth.from(l.getExpiryDate()).equals(month)).toList();
+        if (sameMonth.size() > 1) {
+            throw new BusinessRuleException(String.format(
+                    "Lot %s (REF %s) has more than one expiry date in %02d/%d: type the full date (DD/MM/AAAA) or read the QR code",
+                    number, material.getRef(), month.getMonthValue(), month.getYear()));
+        }
+        return sameMonth.isEmpty() ? null : sameMonth.get(0);
     }
 
     private static String key(Hospital hospital, Lot lot) {

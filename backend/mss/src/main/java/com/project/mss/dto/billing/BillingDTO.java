@@ -7,9 +7,9 @@ import java.time.YearMonth;
 import java.util.List;
 
 /**
- * Billing of completed surgeries in the selected months (by completion date), using each hospital's
+ * Billing of completed surgeries in the selected months (by surgery date), using each hospital's
  * table values recorded at withdrawal. commission = total x commission rate; share = commission x share rate,
- * with the rates in effect in the month each surgery was completed.
+ * with the rates in effect in the month of each surgery date.
  * itemsWithoutValue: items recorded while the REF had no value (not included in the totals until registered).
  */
 public record BillingDTO(

@@ -35,7 +35,7 @@ import com.project.mss.repository.BillingRateRepository;
 import com.project.mss.repository.SurgeryRepository;
 
 /**
- * Billing of completed surgeries (by completion month) and the configurable billing rates.
+ * Billing of completed surgeries (by the month of the surgery date) and the configurable billing rates.
  * A rate applies from its start month until the next registered month. Rates can only be created,
  * changed or removed for the current or future months, so past billing never changes.
  */
@@ -106,7 +106,7 @@ public class BillingService {
                 : accessControlService.allowedHospitals();
 
         List<Surgery> surgeries = hospitals.isEmpty() ? List.of() : surgeryRepository.listCompleted(hospitals,
-                months.first().atDay(1).atStartOfDay(), months.last().plusMonths(1).atDay(1).atStartOfDay());
+                months.first().atDay(1), months.last().atEndOfMonth());
         Map<YearMonth, BillingRate> rates = new HashMap<>();
 
         List<BillingDTO.SurgeryBilling> rows = new ArrayList<>();
@@ -114,7 +114,8 @@ public class BillingService {
         HospitalAccumulator total = new HospitalAccumulator(null, null, null);
 
         for (Surgery c : surgeries) {
-            YearMonth month = YearMonth.from(c.getCompletedAt());
+            // Counted in the month of the surgery date, with the rates in effect in that month
+            YearMonth month = YearMonth.from(c.getSurgeryDate());
             if (!months.contains(month)) continue;
             BillingRate rate = rates.computeIfAbsent(month, this::rateFor);
 
@@ -176,13 +177,13 @@ public class BillingService {
             totalRow.createCell(7).setCellValue(b.share().doubleValue());
 
             Sheet detail = wb.createSheet("Cirurgias");
-            header(detail, "Conclusão", "Data da cirurgia", "Paciente", "Hospital", "Instrumentador", "Itens",
+            header(detail, "Data da cirurgia", "Conclusão", "Paciente", "Hospital", "Instrumentador", "Itens",
                     "Itens sem valor", "Valor", "% comissão", "Comissão", "% sua parte", "Sua parte");
             r = 1;
             for (BillingDTO.SurgeryBilling s : b.surgeries()) {
                 Row row = detail.createRow(r++);
-                row.createCell(0).setCellValue(s.completedAt().toLocalDate().format(DATE));
-                row.createCell(1).setCellValue(s.surgeryDate().format(DATE));
+                row.createCell(0).setCellValue(s.surgeryDate().format(DATE));
+                row.createCell(1).setCellValue(s.completedAt().toLocalDate().format(DATE));
                 row.createCell(2).setCellValue(s.patientName());
                 row.createCell(3).setCellValue(s.hospital());
                 row.createCell(4).setCellValue(s.surgicalTech() == null ? "" : s.surgicalTech());
@@ -209,25 +210,30 @@ public class BillingService {
     @Transactional(readOnly = true)
     public byte[] billingPdf(List<String> months, Long hospitalId) {
         BillingDTO b = billing(months, hospitalId);
-        List<String[]> rows = new ArrayList<>();
-        for (BillingDTO.SurgeryBilling s : b.surgeries()) {
-            rows.add(new String[]{s.completedAt().toLocalDate().format(DATE), s.patientName(), s.hospital(),
-                    String.valueOf(s.itemCount()), money(s.totalValue()), money(s.commission()), money(s.share())});
-        }
         String period = b.months().stream().map(m -> m.format(MONTH)).reduce((a, c) -> a + ", " + c).orElse("");
-        return pdfService.generate(new PdfService.Report(
-                "FATURAMENTO",
-                List.of(new String[]{"Período:", period},
-                        new String[]{"Hospital:", hospitalId == null ? "Todos" : (b.byHospital().isEmpty() ? "-" : b.byHospital().get(0).hospital())},
-                        new String[]{"Cirurgias concluídas:", String.valueOf(b.surgeryCount())},
-                        new String[]{"Valor total:", money(b.totalValue())},
-                        new String[]{"Comissão:", money(b.commission())},
-                        new String[]{"Sua parte da comissão:", money(b.share())}),
-                new String[]{"Conclusão", "Paciente", "Hospital", "Itens", "Valor", "Comissão", "Sua parte"},
-                new float[]{1.1f, 2.6f, 2.2f, 0.6f, 1.2f, 1.2f, 1.2f},
-                rows,
-                b.itemsWithoutValue() > 0 ? "Itens sem valor na tabela (fora dos totais): " + b.itemsWithoutValue() : null,
-                new String[]{}));
+        String hospital = hospitalId == null ? "Todos os hospitais" : (b.byHospital().isEmpty() ? "-" : b.byHospital().get(0).hospital());
+        List<String[]> byHospital = b.byHospital().stream().map(h -> new String[]{h.hospital(),
+                h.priceTableType() == null ? "" : ("SIGTAP".equals(h.priceTableType()) ? "SIGTAP" : "Licitação"),
+                String.valueOf(h.surgeryCount()), String.valueOf(h.itemCount()), money(h.totalValue()), money(h.commission()),
+                money(h.share())}).toList();
+        List<String[]> surgeries = b.surgeries().stream().map(s -> new String[]{s.surgeryDate().format(DATE), s.patientName(),
+                s.hospital(), String.valueOf(s.itemCount()), money(s.totalValue()), money(s.commission()), money(s.share())}).toList();
+        return pdfService.summaryReport(new PdfService.SummaryReport("FATURAMENTO", period + " · " + hospital,
+                List.of(new String[]{money(b.totalValue()), b.surgeryCount() + " cirurgias concluídas"},
+                        new String[]{money(b.commission()), "comissão sobre o total"},
+                        new String[]{money(b.share()), "parte sobre a comissão"},
+                        new String[]{money(b.averagePerSurgery()), "média por cirurgia"}),
+                List.of(new PdfService.Section("Por hospital", null, null,
+                                new String[]{"HOSPITAL", "TABELA", "CIRURGIAS", "ITENS", "VALOR TOTAL", "COMISSÃO", "PARTE"},
+                                new float[]{2f, 0.9f, 0.9f, 0.6f, 1.3f, 1.2f, 1.1f}, new int[]{2, 3, 4, 5, 6}, byHospital,
+                                new String[]{"Total", "", String.valueOf(b.surgeryCount()), String.valueOf(b.itemCount()),
+                                        money(b.totalValue()), money(b.commission()), money(b.share())}),
+                        new PdfService.Section("Cirurgias do período", String.valueOf(b.surgeryCount()), null,
+                                new String[]{"DATA", "PACIENTE", "HOSPITAL", "ITENS", "VALOR", "COMISSÃO", "PARTE"},
+                                new float[]{0.9f, 2.1f, 1.7f, 0.5f, 1.2f, 1.1f, 1f}, new int[]{3, 4, 5, 6}, surgeries, null)),
+                b.itemsWithoutValue() > 0
+                        ? b.itemsWithoutValue() + " itens sem valor na tabela do hospital ficaram fora dos totais."
+                        : "Período pela data da cirurgia; só cirurgias concluídas, com os percentuais de cada mês."));
     }
 
     // ============================================================ helpers

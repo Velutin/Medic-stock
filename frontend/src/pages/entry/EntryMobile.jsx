@@ -106,7 +106,7 @@ export default function EntryMobile({ entry }) {
               error={Boolean(errors.lot)} helperText={errors.lot} autoComplete="off" />
             <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 1.5 }}>
               <ExpiryField label="Validade *" value={item.expiryDate} inputRef={expiryInput}
-                onChange={(v) => reader.set('expiryDate', v)} error={Boolean(errors.expiryDate)} helperText={errors.expiryDate} />
+                onChange={reader.setExpiry} error={Boolean(errors.expiryDate)} helperText={errors.expiryDate} />
               <TextField type="number" label="Quantidade" value={item.quantity}
                 onChange={(e) => reader.set('quantity', e.target.value)} inputProps={{ min: 1, step: 1, inputMode: 'numeric' }}
                 error={Boolean(errors.quantity)} helperText={errors.quantity} />

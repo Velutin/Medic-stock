@@ -8,5 +8,7 @@ public enum MovementType {
     REPLENISHMENT,
     SURGERY_WITHDRAWAL,
     SURGERY_REVERSAL,
-    LOAN
+    LOAN,
+    /** Material returned to the supplier: leaves the stock of the source hospital (or storeroom). */
+    SUPPLIER_RETURN
 }

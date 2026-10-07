@@ -12,6 +12,7 @@ import com.project.mss.dto.hospital.HospitalFormDTO;
 import com.project.mss.dto.hospital.PriceDTO;
 import com.project.mss.dto.hospital.PriceFormDTO;
 import com.project.mss.dto.replenishment.ReplenishmentSuggestionDTO;
+import com.project.mss.dto.replenishment.StockLevelDTO;
 import com.project.mss.service.HospitalService;
 import com.project.mss.service.MaterialService;
 import com.project.mss.service.ReplenishmentService;
@@ -81,6 +82,14 @@ public class HospitalController {
     public List<ReplenishmentSuggestionDTO> replenishmentSuggestions(@PathVariable Long id,
                                                                      @RequestParam(defaultValue = "true") boolean onlyWithShortage) {
         return replenishmentService.suggestion(id, onlyWithShortage);
+    }
+
+    @GetMapping("/{id}/stock-levels")
+    @Operation(summary = "Minimum levels and valid balances of every REF the hospital may work with (ADMIN)",
+               description = "Catalog items of the hospital product lines, REFs with minimum levels and REFs with balance. "
+                       + "For a distribution center, the balance inside is the stock in the hospitals it supplies.")
+    public List<StockLevelDTO> stockLevels(@PathVariable Long id) {
+        return replenishmentService.levels(id);
     }
 
     @PutMapping("/{id}/covered-hospitals")

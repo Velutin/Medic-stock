@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { downloadFile } from '../../api/download';
 import { readCode } from '../../api/scan';
@@ -11,14 +11,19 @@ import { useNotify } from '../../notifications/NotificationProvider';
  * lots come from the center's storeroom; otherwise from the storeroom assigned to the hospital itself.
  * Expired lots are not listed (the API also refuses them).
  */
-export default function useTransferDraft() {
+/**
+ * prefill (optional, from the Replenishment screen): { hospitalId, lots: { [lotId]: quantity } } — the destination
+ * comes chosen and the quantities are filled once the storeroom lots are loaded (still editable).
+ */
+export default function useTransferDraft(prefill) {
   const notify = useNotify();
   const { hospitals, loading: loadingHospitals } = useHospitals();
   const destinations = useMemo(
     () => hospitals.filter((h) => h.type === 'HOSPITAL' && h.active !== false),
     [hospitals],
   );
-  const [hospitalId, setHospitalId] = useState('');
+  const [hospitalId, setHospitalId] = useState(prefill?.hospitalId || '');
+  const pendingPrefill = useRef(prefill?.lots || null);
   const [rows, setRows] = useState([]);
   const [loadingRows, setLoadingRows] = useState(false);
   const [selection, setSelection] = useState({});
@@ -50,6 +55,18 @@ export default function useTransferDraft() {
   }, [sourceId, notify]);
 
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // Quantities suggested by the replenishment, limited to what is in the storeroom now
+  useEffect(() => {
+    if (!pendingPrefill.current || loadingRows || rows.length === 0) return;
+    const next = {};
+    Object.entries(pendingPrefill.current).forEach(([lotId, qty]) => {
+      const row = rows.find((r) => r.lotId === Number(lotId));
+      if (row && qty > 0) next[row.lotId] = Math.min(row.storeroomQuantity, qty);
+    });
+    pendingPrefill.current = null;
+    setSelection(next);
+  }, [rows, loadingRows]);
 
   const changeHospital = useCallback((id) => {
     setHospitalId(id);

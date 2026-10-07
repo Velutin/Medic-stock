@@ -43,7 +43,7 @@ function formatExpiry(iso) {
 /**
  * Expiry date typed on the numeric keyboard: 012030 -> 01/2030 (first day of the month), or 8 digits for a full date.
  * value/onChange use the ISO date ('' when empty, 'invalid' while incomplete); a date read from a QR code
- * shows up here already formatted.
+ * shows up here already formatted. onChange also receives { monthOnly: true } when the date was typed as MM/AAAA.
  */
 export default function ExpiryField({ value, onChange, label = 'Validade (mês/ano)', ...props }) {
   const [text, setText] = useState(() => (value && value !== 'invalid' ? formatExpiry(value) : ''));
@@ -61,7 +61,7 @@ export default function ExpiryField({ value, onChange, label = 'Validade (mês/a
   const change = (e) => {
     const next = mask(e.target.value);
     setText(next);
-    onChange(parseExpiry(next));
+    onChange(parseExpiry(next), { monthOnly: next.replace(/\D/g, '').length === 6 });
   };
 
   return (

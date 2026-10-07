@@ -3,7 +3,7 @@ import { readCode } from '../../api/scan';
 import { useNotify } from '../../notifications/NotificationProvider';
 import { isProductCode, validateItem } from './useEntryDraft';
 
-const EMPTY = { code: '', gtin: '', material: null, lot: '', expiryDate: '', quantity: 1, expectLot: false };
+const EMPTY = { code: '', gtin: '', material: null, lot: '', expiryDate: '', monthOnly: false, quantity: 1, expectLot: false };
 
 /** Codes that identify a product (GS1 QR/Data Matrix/GS1-128 or a bare GTIN), not a lot. */
 const looksLikeProductCode = (v) => /^[(\]]/.test(v) || v.includes('\u001D') || /^\d{8}$|^\d{12,14}$/.test(v)
@@ -24,6 +24,9 @@ export default function useItemReader() {
   const [errors, setErrors] = useState({});
 
   const set = useCallback((field, value) => setItem((it) => ({ ...it, [field]: value })), []);
+
+  /** Expiry date typed on screen; MM/AAAA is flagged so the API can reuse the lot of the same month. */
+  const setExpiry = useCallback((expiryDate, meta) => setItem((it) => ({ ...it, expiryDate, monthOnly: Boolean(meta?.monthOnly) })), []);
 
   /** Typing a new code discards what the previous code had identified. */
   const setCode = useCallback((code) => {
@@ -134,5 +137,5 @@ export default function useItemReader() {
   }, []);
 
   const awaitingLot = item.expectLot && !item.lot;
-  return { item, set, setCode, read, scan, reading, unknown, applyMaterial, load, validate, errors, clear, awaitingLot };
+  return { item, set, setExpiry, setCode, read, scan, reading, unknown, applyMaterial, load, validate, errors, clear, awaitingLot };
 }

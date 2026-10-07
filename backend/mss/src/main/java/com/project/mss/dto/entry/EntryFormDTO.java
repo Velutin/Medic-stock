@@ -15,6 +15,8 @@ import jakarta.validation.constraints.Size;
  * Creates a stock entry or replaces its content (correction). The material always enters the storeroom,
  * assigned to hospitalId (a regular hospital or a distribution center such as SESAB).
  * Lots are identified by material + number + expiry date and created when new; the same lot repeated is summed.
+ * monthOnly: the expiry date was typed as MM/AAAA (sent as day 1); an existing lot with the same number and the
+ * same expiry month is reused instead of creating another one.
  */
 public record EntryFormDTO(
         @NotNull(message = "Destination is required") Long hospitalId,
@@ -27,6 +29,7 @@ public record EntryFormDTO(
             @NotNull(message = "Material is required") Long materialId,
             @NotBlank(message = "Lot is required") @Size(max = 80) String lot,
             @NotNull(message = "Expiry date is required") LocalDate expiryDate,
-            @NotNull @Positive(message = "Quantity must be greater than zero") Integer quantity
+            @NotNull @Positive(message = "Quantity must be greater than zero") Integer quantity,
+            Boolean monthOnly
     ) { }
 }

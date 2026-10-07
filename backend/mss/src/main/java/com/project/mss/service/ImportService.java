@@ -31,6 +31,7 @@ import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.entry.EntryPreviewRowDTO;
+import com.project.mss.dto.replenishment.MinimumPreviewRowDTO;
 import com.project.mss.dto.imports.ImportResultDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.MinimumStock;
@@ -329,6 +330,74 @@ public class ImportService {
             minimumStockRepository.save(min);
             return true;
         });
+    }
+
+    /**
+     * Reads a minimums spreadsheet WITHOUT saving (columns REF, IDEAL, IDEAL TOTAL), so the rows can be reviewed
+     * on screen and then applied through PATCH /hospitals/{id}/minimums.
+     */
+    @Transactional(readOnly = true)
+    public List<MinimumPreviewRowDTO> minimumsPreview(Long hospitalId, MultipartFile file) {
+        accessControlService.requireManager();
+        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
+        String[] required = {"REF", "IDEAL", "IDEALTOTAL"};
+        Map<Long, MinimumStock> current = new HashMap<>();
+        minimumStockRepository.listByHospital(hospitalId).forEach(min -> current.put(min.getMaterial().getId(), min));
+        List<MinimumPreviewRowDTO> rows = new ArrayList<>();
+        try (InputStream in = file.getInputStream(); Workbook wb = WorkbookFactory.create(in)) {
+            Sheet sh = wb.getSheetAt(0);
+            Map<String, Integer> col = null;
+            for (Row row : sh) {
+                if (col == null) {
+                    Map<String, Integer> c = mapHeader(row);
+                    if (c.keySet().containsAll(List.of(required))) col = c;
+                    continue;
+                }
+                String ref = text(row, col.get("REF")).trim().toUpperCase();
+                if (ref.isBlank()) continue;
+                Long materialId = null;
+                String description = null;
+                Integer ideal = null;
+                Integer idealTotal = null;
+                int currentIdeal = 0;
+                int currentTotal = 0;
+                String error = null;
+                try {
+                    Optional<Material> m = materialRepository.findByRefIgnoreCase(ref);
+                    if (m.isEmpty()) throw new IllegalArgumentException("REF " + ref + " is not registered");
+                    materialId = m.get().getId();
+                    description = m.get().getDescription();
+                    MinimumStock min = current.get(materialId);
+                    if (min != null) {
+                        currentIdeal = min.getHospitalIdeal();
+                        currentTotal = min.getIdealTotal();
+                    }
+                    BigDecimal i = number(row, col.get("IDEAL"));
+                    BigDecimal t = number(row, col.get("IDEALTOTAL"));
+                    if (i == null || t == null) throw new IllegalArgumentException("IDEAL and IDEAL TOTAL are required");
+                    if (i.stripTrailingZeros().scale() > 0 || t.stripTrailingZeros().scale() > 0) {
+                        throw new IllegalArgumentException("levels must be whole numbers");
+                    }
+                    ideal = i.intValue();
+                    idealTotal = t.intValue();
+                    try {
+                        MinimumStockService.validate(hospital, ideal, idealTotal);
+                    } catch (BusinessRuleException e) {
+                        throw new IllegalArgumentException(e.getMessage());
+                    }
+                } catch (IllegalArgumentException e) {
+                    error = e.getMessage();
+                }
+                rows.add(new MinimumPreviewRowDTO(row.getRowNum() + 1, ref, materialId, description, ideal, idealTotal,
+                        currentIdeal, currentTotal, error));
+            }
+            if (col == null) {
+                throw new BusinessRuleException("Header not found. Required columns: REF, IDEAL, IDEAL TOTAL");
+            }
+        } catch (IOException e) {
+            throw new BusinessRuleException("Could not read the spreadsheet: " + e.getMessage());
+        }
+        return rows;
     }
 
     // ============================================================ generic engine
