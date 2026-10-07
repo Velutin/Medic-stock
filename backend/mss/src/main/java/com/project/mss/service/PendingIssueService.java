@@ -1,19 +1,31 @@
 package com.project.mss.service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.material.ScannedCodeDTO;
 import com.project.mss.dto.surgery.PendingIssueDTO;
+import com.project.mss.dto.surgery.PendingLotOptionDTO;
 import com.project.mss.dto.surgery.PendingIssueStatusUpdateDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
+import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
+import com.project.mss.model.entity.Material;
 import com.project.mss.model.entity.PendingIssue;
+import com.project.mss.model.entity.Stock;
 import com.project.mss.model.enums.ReadSource;
 import com.project.mss.model.enums.PendingIssueStatus;
+import com.project.mss.repository.LotRepository;
+import com.project.mss.repository.MaterialRepository;
 import com.project.mss.repository.PendingIssueRepository;
 
 @Service
@@ -23,13 +35,74 @@ public class PendingIssueService {
     private final SurgeryService surgeryService;
     private final MaterialService materialService;
     private final AccessControlService accessControlService;
+    private final LotScanService lotScanService;
+    private final LotRepository lotRepository;
+    private final MaterialRepository materialRepository;
+    private final StockService stockService;
 
     public PendingIssueService(PendingIssueRepository pendingIssueRepository, SurgeryService surgeryService,
-                            MaterialService materialService, AccessControlService accessControlService) {
+                            MaterialService materialService, AccessControlService accessControlService,
+                            LotScanService lotScanService, LotRepository lotRepository,
+                            MaterialRepository materialRepository, StockService stockService) {
         this.pendingIssueRepository = pendingIssueRepository;
         this.surgeryService = surgeryService;
         this.materialService = materialService;
         this.accessControlService = accessControlService;
+        this.lotScanService = lotScanService;
+        this.lotRepository = lotRepository;
+        this.materialRepository = materialRepository;
+        this.stockService = stockService;
+    }
+
+    /**
+     * Lots to resolve a pending issue, as the surgery screen shows them: the valid lots inside the hospital of the
+     * material(s) identified by what was read (GTIN, REF, or registered lots with the number read). Lots with the
+     * number read come first. Empty when nothing is identified: the screen then offers a search.
+     */
+    @Transactional(readOnly = true)
+    public List<PendingLotOptionDTO> suggestions(Long id) {
+        accessControlService.requireManager();
+        PendingIssue p = pendingIssueRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Pending issue " + id + " not found"));
+        Hospital hospital = accessControlService.requireHospitalAccess(p.getHospital().getId());
+        LocalDate date = p.getSurgery() != null ? p.getSurgery().getSurgeryDate() : LocalDate.now();
+        String code = p.getEnteredCode() == null ? "" : p.getEnteredCode().trim();
+
+        String number = null;
+        Set<Long> materials = new LinkedHashSet<>();
+        if (!code.isEmpty()) {
+            try {
+                ScannedCodeDTO read = lotScanService.read(code);
+                if (read.material() != null) materials.add(read.material().id());
+                number = read.lot() != null ? read.lot()
+                        : read.gtin() == null && read.material() == null ? code.toUpperCase() : null;
+            } catch (RuntimeException unreadable) {
+                number = code.toUpperCase();
+            }
+        }
+        if (p.getEnteredRef() != null && !p.getEnteredRef().isBlank()) {
+            materialRepository.findByRefIgnoreCase(p.getEnteredRef().trim()).ifPresent(m -> materials.add(m.getId()));
+        }
+        if (number != null) {
+            lotRepository.findByNumber(number).forEach(l -> materials.add(l.getMaterial().getId()));
+        }
+
+        String readNumber = number;
+        List<PendingLotOptionDTO> out = new ArrayList<>();
+        for (Long materialId : materials) {
+            for (Stock s : stockService.lotsInsideHospital(hospital, materialId, date)) {
+                Lot l = s.getLot();
+                Material m = l.getMaterial();
+                String name = m.getComponent() != null && !m.getComponent().isBlank()
+                        ? m.getComponent() + (m.getSize() != null && !m.getSize().isBlank() ? " · " + m.getSize() : "")
+                        : m.getDescription();
+                out.add(new PendingLotOptionDTO(l.getId(), m.getRef(), name, l.getNumber(), l.getExpiryDate(),
+                        s.getQuantity(), readNumber != null && l.hasNumber(readNumber)));
+            }
+        }
+        out.sort(Comparator.comparing((PendingLotOptionDTO o) -> !o.sameLot())
+                .thenComparing(PendingLotOptionDTO::ref).thenComparing(PendingLotOptionDTO::expiryDate));
+        return out;
     }
 
     @Transactional(readOnly = true)

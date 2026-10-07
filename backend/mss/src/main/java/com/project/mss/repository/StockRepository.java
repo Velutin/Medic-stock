@@ -83,7 +83,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
 
     /**
      * Stock by lot and hospital, for the given hospitals. term (optional, partial, case-insensitive)
-     * matches the lot number, REF, name (component), description or GTIN.
+     * matches the lot number (also without its leading zeros), REF, name (component), description or GTIN.
      */
     @Query(value = """
            SELECT new com.project.mss.dto.stock.LotStockDTO(
@@ -95,6 +95,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
            WHERE e.quantity > 0 AND h.id IN :hospitalIds
              AND (:term IS NULL
                   OR UPPER(l.number) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR TRIM(LEADING '0' FROM UPPER(l.number)) LIKE CONCAT('%', TRIM(LEADING '0' FROM UPPER(CAST(:term AS String))), '%')
                   OR UPPER(m.ref) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
                   OR UPPER(m.component) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
                   OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
@@ -108,6 +109,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
            WHERE e.quantity > 0 AND h.id IN :hospitalIds
              AND (:term IS NULL
                   OR UPPER(l.number) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR TRIM(LEADING '0' FROM UPPER(l.number)) LIKE CONCAT('%', TRIM(LEADING '0' FROM UPPER(CAST(:term AS String))), '%')
                   OR UPPER(m.ref) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
                   OR UPPER(m.component) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
                   OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))

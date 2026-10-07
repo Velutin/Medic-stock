@@ -36,4 +36,11 @@ public interface SurgeryItemRepository extends JpaRepository<SurgeryItem, Long> 
              AND s.status <> com.project.mss.model.enums.SurgeryStatus.CANCELLED
            """)
     Page<SurgeryItem> pageWithoutPrice(@Param("hospitalIds") Collection<Long> hospitalIds, Pageable pageable);
+
+    /** True when the lot was withdrawn in a surgery that was not cancelled. */
+    @Query("""
+           SELECT CASE WHEN COUNT(i) > 0 THEN true ELSE false END FROM SurgeryItem i
+           WHERE i.lot.id = :lotId AND i.surgery.status <> com.project.mss.model.enums.SurgeryStatus.CANCELLED
+           """)
+    boolean usedInSurgery(@Param("lotId") Long lotId);
 }

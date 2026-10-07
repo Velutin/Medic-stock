@@ -6,9 +6,12 @@ import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -38,6 +41,9 @@ import com.project.mss.repository.StockEntryRepository;
  * An entry can be corrected as a whole (destination, date, REF, lot, expiry date, quantity). The correction
  * only applies the difference between the old and the new content, and is refused when the material to be
  * removed has already left the storeroom (delivered to the hospital or adjusted).
+ *
+ * A lot number belongs to only one REF: a number already registered with another REF enters only after the user
+ * confirms the REF change of those lots (item.changeRef), done by {@link LotRefChangeService}.
  */
 @Service
 public class StockEntryService {
@@ -64,11 +70,12 @@ public class StockEntryService {
     private final StockService stockService;
     private final AccessControlService accessControlService;
     private final LotRepository lotRepository;
+    private final LotRefChangeService lotRefChangeService;
 
     public StockEntryService(StockEntryRepository stockEntryRepository, HospitalRepository hospitalRepository,
                              MaterialRepository materialRepository, MaterialService materialService,
                              StockService stockService, AccessControlService accessControlService,
-                             LotRepository lotRepository) {
+                             LotRepository lotRepository, LotRefChangeService lotRefChangeService) {
         this.stockEntryRepository = stockEntryRepository;
         this.hospitalRepository = hospitalRepository;
         this.materialRepository = materialRepository;
@@ -76,11 +83,13 @@ public class StockEntryService {
         this.stockService = stockService;
         this.accessControlService = accessControlService;
         this.lotRepository = lotRepository;
+        this.lotRefChangeService = lotRefChangeService;
     }
 
     @Transactional
     public EntryDTO create(EntryFormDTO dto) {
         accessControlService.requireManager();
+        applyRefChanges(dto.items(), Set.of());
         Hospital destination = requireDestination(dto.hospitalId());
         Map<Long, ResolvedItem> items = resolveItems(dto.items());
 
@@ -103,6 +112,10 @@ public class StockEntryService {
     @Transactional
     public EntryDTO update(Long id, EntryFormDTO dto) {
         accessControlService.requireManager();
+        // Items the entry already had keep their lot as it is (the rule applies to what is added or changed)
+        Set<String> kept = new HashSet<>();
+        load(id).getItems().forEach(i -> kept.add(lotKey(i.getLot().getMaterial().getId(), i.getLot().getNumber())));
+        applyRefChanges(dto.items(), kept);
         StockEntry entry = load(id);
         Hospital previous = entry.getHospital();
         Hospital destination = requireDestination(dto.hospitalId());
@@ -177,6 +190,43 @@ public class StockEntryService {
     }
 
     // ============================================================ helpers
+
+    /**
+     * One REF per lot number: refuses the same number with two REFs in the request and, for a number already
+     * registered with another REF, changes those lots to this REF when the user confirmed it (changeRef).
+     */
+    private void applyRefChanges(List<EntryFormDTO.Item> items, Set<String> kept) {
+        Map<String, Long> materialByNumber = new LinkedHashMap<>();
+        Map<String, Boolean> confirmed = new HashMap<>();
+        for (EntryFormDTO.Item item : items) {
+            // Compared without leading zeros: 005706061 and 5706061 are the same lot
+            String number = Lot.comparableNumber(item.lot());
+            Long previous = materialByNumber.putIfAbsent(number, item.materialId());
+            if (previous != null && !previous.equals(item.materialId())) {
+                throw new BusinessRuleException(String.format(
+                        "Lot %s appears with more than one REF in this entry: a lot number belongs to only one REF", number));
+            }
+            confirmed.merge(number, Boolean.TRUE.equals(item.changeRef()), Boolean::logicalOr);
+        }
+        for (Map.Entry<String, Long> e : materialByNumber.entrySet()) {
+            String number = e.getKey();
+            Long materialId = e.getValue();
+            List<Lot> others = lotRefChangeService.conflicts(materialId, number);
+            if (others.isEmpty()) continue;
+            boolean change = confirmed.get(number);
+            if (!change && kept.contains(lotKey(materialId, number))) continue;
+            if (!change) {
+                String refs = others.stream().map(l -> l.getMaterial().getRef()).distinct().collect(Collectors.joining(", "));
+                throw new BusinessRuleException(String.format(
+                        "Lot %s is already registered with REF %s: confirm the REF change of those lots to receive it", number, refs));
+            }
+            lotRefChangeService.changeRef(materialId, number);
+        }
+    }
+
+    private static String lotKey(Long materialId, String number) {
+        return materialId + ":" + Lot.comparableNumber(number);
+    }
 
     private StockEntry load(Long id) {
         StockEntry entry = stockEntryRepository.findById(id)

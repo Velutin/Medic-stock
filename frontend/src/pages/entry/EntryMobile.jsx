@@ -13,6 +13,7 @@ import { todayIso } from './useEntryDraft';
 import useItemReader from './useItemReader';
 import MaterialLabel from './MaterialLabel';
 import ExpiryField from './ExpiryField';
+import LotRefChangeDialog from './LotRefChangeDialog';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -32,11 +33,32 @@ export default function EntryMobile({ entry }) {
     if (result && !result.material && result.lot) setTimeout(() => expiryInput.current?.focus(), 100);
   };
 
-  const add = () => {
+  /** One REF per lot: a lot registered with another REF opens the REF change dialog before entering. */
+  const add = async () => {
     if (!reader.validate()) return;
-    entry.addItem(item);
+    try {
+      const result = await entry.requestAdd([item]);
+      if (result.problem) {
+        notify.warning(result.problem);
+        return;
+      }
+      if (result.waiting) return; // the REF change dialog answers; the item stays on screen meanwhile
+    } catch (err) {
+      notify.error(err);
+      return;
+    }
     notify.success(`${item.material.ref} · lote ${item.lot.toUpperCase()} adicionado.`);
     reader.clear();
+  };
+
+  const confirmRefChange = () => {
+    const added = entry.confirmRefChange();
+    if (added) {
+      notify.success('REF dos lotes trocada: item adicionado.');
+      reader.clear();
+    } else {
+      notify.warning('Item não adicionado: o lote já saiu em cirurgia com a REF atual. Confira a REF do item.');
+    }
   };
 
   const submit = async () => {
@@ -76,7 +98,7 @@ export default function EntryMobile({ entry }) {
         onChange={(e) => setField('entryDate', e.target.value)} InputLabelProps={{ shrink: true }}
         inputProps={{ max: todayIso() }} />
 
-      <CodeReader onCode={onCode} busy={reader.reading || newItemOpen}
+      <CodeReader onCode={onCode} busy={reader.reading || newItemOpen || Boolean(entry.refConflict)}
         typedLabel={reader.awaitingLot ? 'Código do lote' : 'Código ou REF'} />
 
       {hasRead && (
@@ -167,6 +189,8 @@ export default function EntryMobile({ entry }) {
       <ItemDialog open={newItemOpen} item={null} initial={reader.unknown || undefined}
         onClose={() => setNewItemOpen(false)}
         onSaved={(saved) => { setNewItemOpen(false); reader.applyMaterial(saved); }} />
+      <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
+        onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
     </Stack>
   );
 }

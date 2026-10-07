@@ -38,6 +38,21 @@ public class Lot {
         if (number != null) number = number.trim().toUpperCase();
     }
 
+    /**
+     * Lot number used to compare lots: upper case, without spaces and without leading zeros. The labels print the lot
+     * with 9 digits (e.g. 005706061) and the same lot may be registered without the zeros (5706061): both are one lot.
+     */
+    public static String comparableNumber(String number) {
+        if (number == null) return "";
+        String n = number.trim().toUpperCase().replaceFirst("^0+", "");
+        return n.isEmpty() ? "0" : n;
+    }
+
+    /** True when the number refers to this lot, ignoring case and leading zeros. */
+    public boolean hasNumber(String other) {
+        return comparableNumber(number).equals(comparableNumber(other));
+    }
+
     /** Expired lots do not count as available stock. */
     public boolean isExpired(LocalDate reference) {
         return expiryDate.isBefore(reference);

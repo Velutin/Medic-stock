@@ -12,6 +12,7 @@ import { useNotify } from '../../notifications/NotificationProvider';
 import { formatDateTime } from '../../utils/format';
 import { tokens } from '../../theme';
 import { MOVEMENT_TYPES } from '../reports/SimpleReports';
+import { todayIso } from '../reports/reportUtils';
 
 const ALERTS_SHOWN = 8;
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
@@ -23,7 +24,7 @@ const weekDay = (iso, label) => {
 const place = (hospital, location) => (hospital
   ? `${hospital}${location === 'STOREROOM' ? ' (sala)' : ''}` : null);
 
-function Kpi({ label, value, hint, tone, to }) {
+function Kpi({ label, value, hint, tone, to, state }) {
   const color = tone === 'error' ? tokens.error : tone === 'warning' ? tokens.warning : tokens.text;
   const content = (
     <Paper variant="outlined" sx={{ p: 2.5, height: '100%', transition: 'border-color .15s', ...(to ? { '&:hover': { borderColor: tokens.primary } } : {}) }}>
@@ -32,7 +33,7 @@ function Kpi({ label, value, hint, tone, to }) {
       <Typography variant="caption" color="text.secondary">{hint}</Typography>
     </Paper>
   );
-  return to ? <Link component={RouterLink} to={to} underline="none" color="inherit" sx={{ display: 'block' }}>{content}</Link> : content;
+  return to ? <Link component={RouterLink} to={to} state={state} underline="none" color="inherit" sx={{ display: 'block' }}>{content}</Link> : content;
 }
 
 function Card({ title, action, children }) {
@@ -71,6 +72,16 @@ export default function DashboardPage() {
   const week = data ? `${weekDay(data.weekStart, 'sáb')} a ${weekDay(data.weekEnd, 'sex')}` : '';
   const maxSurgeries = Math.max(1, ...(data?.surgeriesByHospital || []).map((h) => h.surgeries));
   const alerts = data?.replenishmentAlerts || [];
+  // Opens the pending issues report already filtered: open ones, same hospital, a period that holds all of them.
+  const pendingState = data?.openPendingIssues ? {
+    report: 'pending',
+    filters: {
+      status: 'OPEN',
+      hospitalId,
+      start: data.oldestPendingDate,
+      ...(data.latestPendingDate > todayIso() ? { end: data.latestPendingDate } : {}),
+    },
+  } : { report: 'pending' };
 
   return (
     <>
@@ -86,18 +97,19 @@ export default function DashboardPage() {
 
       {!data ? (
         <Stack spacing={2}>
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' } }}>
-            {[1, 2, 3, 4].map((i) => <Skeleton key={i} variant="rounded" height={118} />)}
+          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(5, 1fr)' } }}>
+            {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} variant="rounded" height={118} />)}
           </Box>
           <Skeleton variant="rounded" height={260} />
         </Stack>
       ) : (
         <Stack spacing={2.5}>
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' } }}>
+          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(5, 1fr)' } }}>
             <Kpi label="Itens em estoque" value={number(data.stockUnits)} hint="Hospitais + sala, lotes dentro da validade" to="/estoque" />
             <Kpi label="Vencem em 30 dias" value={number(data.lotsExpiringIn30Days)} hint="Lotes a priorizar" tone={data.lotsExpiringIn30Days ? 'warning' : undefined} to="/relatorios" />
             <Kpi label="Vencidos" value={number(data.expiredLots)} hint="Lotes fora da contagem de reposição" tone={data.expiredLots ? 'error' : undefined} to="/relatorios" />
             <Kpi label="Cirurgias na semana" value={number(data.weekSurgeries)} hint="Fechamento na sexta (em aberto e concluídas)" to="/relatorios" />
+            <Kpi label="Pendências" value={number(data.openPendingIssues)} hint="Em aberto na saída, aguardando conferência" tone={data.openPendingIssues ? 'warning' : undefined} to="/relatorios" state={pendingState} />
           </Box>
 
           <Box sx={{ display: 'grid', gap: 2.5, alignItems: 'start', gridTemplateColumns: { xs: '1fr', lg: '3fr 2fr' } }}>

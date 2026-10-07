@@ -11,6 +11,7 @@ import ColorSwatch from '../../components/ColorSwatch';
 import { useAuth } from '../../auth/AuthProvider';
 import { formatDate } from '../../utils/format';
 import { tokens } from '../../theme';
+import { lotContains } from '../../utils/lot';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const PAGE_SIZE = 25;
@@ -37,7 +38,7 @@ export default function TransferDesktop({ transfer }) {
   const filtered = useMemo(() => {
     const t = term.trim().toUpperCase();
     if (!t) return rows;
-    return rows.filter((r) => [r.ref, r.lot, r.description, r.component].some((v) => v && v.toUpperCase().includes(t)));
+    return rows.filter((r) => lotContains(r.lot, t) || [r.ref, r.description, r.component].some((v) => v && v.toUpperCase().includes(t)));
   }, [rows, term]);
   const visible = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 

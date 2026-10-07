@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
+import { downloadFile } from '../../api/download';
 import { readCode } from '../../api/scan';
 import useHospitals from '../../hooks/useHospitals';
 import { useNotify } from '../../notifications/NotificationProvider';
+import { sameLot } from '../../utils/lot';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -11,7 +13,8 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
  *  - LOAN: from the stock inside a hospital or its storeroom to inside another hospital (no distribution centers);
  *    expired lots are not listed. The supplier is informed when the loan is made (no pending status).
  *  - RETURN: the lots leave the source and go back to Baumer (no destination); expired lots can be returned and the
- *    reason is required. A distribution center (SESAB) can return from its storeroom.
+ *    reason is required. A distribution center (SESAB) can return from its storeroom. The return PDF (items sent to
+ *    the company) is downloaded right after confirming.
  */
 export default function useLoanDraft() {
   const notify = useNotify();
@@ -129,9 +132,9 @@ export default function useLoanDraft() {
     }
     const typed = code.trim().toUpperCase();
     const candidates = scan.lot
-      ? rows.filter((r) => r.lot === scan.lot && (!scan.material || r.materialId === scan.material.id)
+      ? rows.filter((r) => sameLot(r.lot, scan.lot) && (!scan.material || r.materialId === scan.material.id)
           && (!scan.expiryDate || r.expiryDate === scan.expiryDate))
-      : rows.filter((r) => r.lot === typed);
+      : rows.filter((r) => sameLot(r.lot, typed));
     if (candidates.length === 0) {
       const where = location === 'HOSPITAL' ? `dentro de ${source.name}` : `na sala de ${source.name}`;
       notify.error(!scan.lot && scan.material
@@ -177,6 +180,10 @@ export default function useLoanDraft() {
       setReason('');
       loadRows();
       loadHistory();
+      if (kind === 'RETURN') {
+        downloadFile(`/loans/${saved.id}/pdf`, `devolucao-${saved.id}.pdf`)
+          .catch((err) => notify.error(`A devolução foi registrada, mas o PDF não foi baixado: ${err.message}`));
+      }
       return saved;
     } catch (err) {
       notify.error(err);

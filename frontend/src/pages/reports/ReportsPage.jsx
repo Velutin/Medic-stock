@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Box, Button, ButtonBase, IconButton, MenuItem, Paper, Stack, TextField, Typography,
 } from '@mui/material';
@@ -42,7 +43,7 @@ const addDays = (iso, n) => {
 };
 const initialFilters = () => ({
   start: monthStartIso(), end: todayIso(), hospitalId: '', week: saturdayOf(todayIso()),
-  patient: '', status: 'OPEN', days: 30, movementType: '',
+  patient: '', status: 'OPEN', days: 30, movementType: '', lot: '',
 });
 
 /** Reports: choose the report, filter, preview on screen and generate the PDF with the same filters. */
@@ -50,9 +51,12 @@ export default function ReportsPage() {
   const notify = useNotify();
   const { hospitals } = useHospitals();
   const active = useMemo(() => hospitals.filter((h) => h.active !== false), [hospitals]);
-  const [type, setType] = useState('consumption');
-  const [filters, setFilters] = useState(initialFilters);
+  // The dashboard can open a report already chosen and filtered (e.g. the open pending issues).
+  const { state } = useLocation();
+  const [type, setType] = useState(() => (TYPES.some((t) => t.id === state?.report) ? state.report : 'consumption'));
+  const [filters, setFilters] = useState(() => ({ ...initialFilters(), ...(state?.filters || {}) }));
   const [patientTyped, setPatientTyped] = useState('');
+  const [lotTyped, setLotTyped] = useState('');
   const current = TYPES.find((t) => t.id === type);
   const set = (field, value) => setFilters((f) => ({ ...f, [field]: value }));
 
@@ -62,7 +66,7 @@ export default function ReportsPage() {
     weekly: { date: filters.week, hospitalId },
     cancellations: period,
     pending: { ...period, status: filters.status || undefined },
-    deliveries: period,
+    deliveries: { ...period, lot: filters.lot || undefined },
     consumption: { ...period, patient: filters.patient || undefined },
     validity: { hospitalId, days: filters.days },
     loans: period,
@@ -84,6 +88,7 @@ export default function ReportsPage() {
   const clear = () => {
     setFilters(initialFilters());
     setPatientTyped('');
+    setLotTyped('');
   };
 
   return (
@@ -134,6 +139,13 @@ export default function ReportsPage() {
             <TextField size="small" label="Nome do paciente" value={patientTyped} onChange={(e) => setPatientTyped(e.target.value)}
               onBlur={() => set('patient', patientTyped.trim())}
               onKeyDown={(e) => { if (e.key === 'Enter') set('patient', patientTyped.trim()); }} />
+          )}
+          {type === 'deliveries' && (
+            <TextField size="small" label="Lote" value={lotTyped} autoComplete="off"
+              onChange={(e) => setLotTyped(e.target.value.toUpperCase())}
+              onBlur={() => set('lot', lotTyped.trim())}
+              onKeyDown={(e) => { if (e.key === 'Enter') set('lot', lotTyped.trim()); }}
+              helperText={filters.lot ? 'Entregas com este lote no período' : 'Tecle Enter para pesquisar'} />
           )}
           {type === 'pending' && (
             <TextField select size="small" label="Situação" value={filters.status} sx={{ minWidth: 180 }}

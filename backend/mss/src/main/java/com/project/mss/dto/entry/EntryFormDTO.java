@@ -17,6 +17,8 @@ import jakarta.validation.constraints.Size;
  * Lots are identified by material + number + expiry date and created when new; the same lot repeated is summed.
  * monthOnly: the expiry date was typed as MM/AAAA (sent as day 1); an existing lot with the same number and the
  * same expiry month is reused instead of creating another one.
+ * changeRef: a lot number belongs to only one REF. When the number is already registered with another REF, the
+ * user confirms (true) that those lots become this item's REF; refused for lots already used in a surgery.
  */
 public record EntryFormDTO(
         @NotNull(message = "Destination is required") Long hospitalId,
@@ -30,6 +32,7 @@ public record EntryFormDTO(
             @NotBlank(message = "Lot is required") @Size(max = 80) String lot,
             @NotNull(message = "Expiry date is required") LocalDate expiryDate,
             @NotNull @Positive(message = "Quantity must be greater than zero") Integer quantity,
-            Boolean monthOnly
+            Boolean monthOnly,
+            Boolean changeRef
     ) { }
 }

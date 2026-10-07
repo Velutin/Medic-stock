@@ -11,6 +11,7 @@ import { formatDate } from '../../utils/format';
 import { tokens } from '../../theme';
 import LoanForm from './LoanForm';
 import LoanHistory from './LoanHistory';
+import { lotContains } from '../../utils/lot';
 
 const PAGE = 25;
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
@@ -26,7 +27,7 @@ export default function LoanDesktop({ loan }) {
   useEffect(() => { setPage(0); }, [term, loan.sourceId, loan.location, loan.kind]);
   const filtered = useMemo(() => {
     const t = term.trim().toUpperCase();
-    return t ? loan.rows.filter((r) => [r.ref, r.lot, r.description, r.component].some((v) => v && v.toUpperCase().includes(t))) : loan.rows;
+    return t ? loan.rows.filter((r) => lotContains(r.lot, t) || [r.ref, r.description, r.component].some((v) => v && v.toUpperCase().includes(t))) : loan.rows;
   }, [loan.rows, term]);
   const visible = filtered.slice(page * PAGE, page * PAGE + PAGE);
 

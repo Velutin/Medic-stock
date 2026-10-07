@@ -111,6 +111,10 @@ Report logo: `backend/mss/branding/logo.png`. To change it, replace the file kee
   registered on the spot.
 - `PUT /stock-entries/{id}` corrects the whole entry (destination, date, REF, lot, expiry date, quantity) and applies
   only the differences as `ENTRY_CORRECTION`; it is refused when the material to remove already left the storeroom.
+- **One REF per lot number** (the same REF may have the number with several expiry dates). When a number already
+  registered with another REF enters, the screen lists those lots (`POST /stock-entries/lot-conflicts`) and, after
+  confirmation (`changeRef` on the item), they become the new REF with their balance and history. Lots already
+  withdrawn in a surgery cannot change REF. Applies to the entry only (computer, phone and entry spreadsheet).
 - `POST /stock-entries/preview` reads an entry spreadsheet (REF, LOTE, VALIDADE, QUANTIDADE) for review, without saving.
 - Scanning on the entry screen: a GS1 QR code fills REF, lot and expiry date. A GTIN barcode identifies only the REF;
   the next reading is taken as the lot barcode (the same GTIN read again is refused), and the expiry date is typed
@@ -137,7 +141,7 @@ Report logo: `backend/mss/branding/logo.png`. To change it, replace the file kee
 - Surgery withdrawals debit the stock **inside** the hospital and use that hospital's price table.
 - Unknown, ambiguous, expired or out-of-balance lots become **pending issues** without touching balances.
 - Each consumption sheet label counts as 1 item. Sheet photos are converted to PDF.
-- Loans can come from the hospital or the storeroom; the supplier is informed when the loan is made (no pending status). A return to the supplier (Baumer) takes the material out of every stock: reason required, expired lots accepted, no PDF.
+- Loans can come from the hospital or the storeroom; the supplier is informed when the loan is made (no pending status). A return to the supplier (Baumer) takes the material out of every stock: reason required, expired lots accepted; each return has its own PDF (items sent to the company).
 - Replenishment: below Ideal → replenish from the storeroom; below Ideal total → order from the supplier. Expired lots are ignored.
 - Surgical techs only see the hospitals they work at; ADMIN/MASTER see all of them.
 - Weekly surgery report: Saturday to Friday.

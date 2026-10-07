@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, TableCell, TextField,
-  ToggleButton, ToggleButtonGroup, Typography,
+  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, List, ListItemButton, Radio, Stack,
+  TableCell, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
 } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
 import { api } from '../../api/client';
 import { useNotify } from '../../notifications/NotificationProvider';
 import StatusChip from '../../components/StatusChip';
 import { formatDate } from '../../utils/format';
 import { tokens } from '../../theme';
 import { Empty, Loading, PagedTable, useReport } from './reportUtils';
+import { lotContains } from '../../utils/lot';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 export const REASONS = {
@@ -17,30 +19,76 @@ export const REASONS = {
 };
 const STATUS = { OPEN: ['warning', 'Em aberto'], RESOLVED: ['success', 'Resolvida'], DISCARDED: ['neutral', 'Descartada'] };
 
+const MAX_RESULTS = 15;
+const materialName = (r) => (r.component ? `${r.component}${r.size ? ` · ${r.size}` : ''}` : r.description);
+
+/** Selectable lots: REF, material, lot, expiry date and units inside the hospital. */
+function LotChoices({ options, value, onChange }) {
+  return (
+    <List dense disablePadding sx={{ border: `1px solid ${tokens.border}`, borderRadius: '6px', overflow: 'hidden' }}>
+      {options.map((o, i) => (
+        <ListItemButton key={o.lotId} selected={value === o.lotId} onClick={() => onChange(o.lotId)}
+          sx={{ gap: 1.5, alignItems: 'flex-start', ...(i ? { borderTop: `1px solid ${tokens.divider}` } : {}) }}>
+          <Radio size="small" checked={value === o.lotId} tabIndex={-1} sx={{ p: 0, mt: 0.25 }}
+            inputProps={{ 'aria-label': `${o.ref} lote ${o.lot}` }} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontSize: 14, fontWeight: 600 }} noWrap>{o.material}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={mono}>
+              {o.ref} · {o.lot} · Val. {formatDate(o.expiryDate)}
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{o.available} no hospital</Typography>
+            {o.sameLot && <StatusChip tone="success">Mesmo lote lido</StatusChip>}
+            {o.expired && <StatusChip tone="error">Vencido</StatusChip>}
+          </Box>
+        </ListItemButton>
+      ))}
+    </List>
+  );
+}
+
 /**
- * Resolves a pending issue: records one of the hospital lots in the surgery (RESOLVED) or closes it with a
- * justification (DISCARDED), e.g. a patient label read by mistake.
+ * Resolves a pending issue: records a lot inside the hospital in the surgery (RESOLVED) or closes it with a
+ * justification (DISCARDED), e.g. a patient label read by mistake. First come the lots of the item read, as on the
+ * surgery screen; when the right one is not there, a search by lot or REF looks at every lot inside the hospital.
  */
 function ResolveDialog({ issue, onClose, onDone }) {
   const notify = useNotify();
   const [mode, setMode] = useState('RESOLVED');
-  const [lots, setLots] = useState(null);
+  const [suggested, setSuggested] = useState(null);
+  const [inside, setInside] = useState(null);
+  const [search, setSearch] = useState('');
   const [lotId, setLotId] = useState('');
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
+  const fullScreen = useMediaQuery('(max-width:599.95px)');
 
   useEffect(() => {
     if (!issue) return;
     setMode('RESOLVED');
     setLotId('');
     setText('');
-    setLots(null);
-    api(`/stock/hospital/${issue.hospitalId}`).then((rows) => {
-      const inside = rows.filter((r) => r.hospitalQuantity > 0);
-      const ref = issue.enteredRef?.toUpperCase();
-      setLots(ref ? inside.filter((r) => r.ref.toUpperCase() === ref).concat(inside.filter((r) => r.ref.toUpperCase() !== ref)) : inside);
-    }).catch(() => setLots([]));
+    setSearch('');
+    setSuggested(null);
+    setInside(null);
+    api(`/pending-issues/${issue.id}/suggestions`).then(setSuggested).catch(() => setSuggested([]));
   }, [issue]);
+
+  // Every lot inside the hospital, loaded only when a search is typed
+  const term = search.trim().toUpperCase();
+  useEffect(() => {
+    if (!issue || term.length < 2 || inside) return;
+    api(`/stock/hospital/${issue.hospitalId}`)
+      .then((rows) => setInside(rows.filter((r) => r.hospitalQuantity > 0).map((r) => ({
+        lotId: r.lotId, ref: r.ref, material: materialName(r), lot: r.lot, expiryDate: r.expiryDate,
+        available: r.hospitalQuantity, expired: r.expired,
+      }))))
+      .catch((err) => { notify.error(err); setInside([]); });
+  }, [issue, term, inside, notify]);
+
+  const found = term.length < 2 || !inside ? null
+    : inside.filter((o) => lotContains(o.lot, term) || o.ref.toUpperCase().includes(term));
 
   const save = async () => {
     setSaving(true);
@@ -63,7 +111,7 @@ function ResolveDialog({ issue, onClose, onDone }) {
   const valid = mode === 'RESOLVED' ? Boolean(lotId) : text.trim().length > 0;
 
   return (
-    <Dialog open={Boolean(issue)} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={Boolean(issue)} onClose={onClose} fullWidth maxWidth="sm" fullScreen={fullScreen}>
       <DialogTitle sx={{ typography: 'h2' }}>Resolver pendência</DialogTitle>
       <DialogContent dividers>
         {issue && (
@@ -77,14 +125,39 @@ function ResolveDialog({ issue, onClose, onDone }) {
               <ToggleButton value="DISCARDED">Descartar</ToggleButton>
             </ToggleButtonGroup>
             {mode === 'RESOLVED' && (
-              <TextField select label="Lote dentro do hospital" value={lotId} onChange={(e) => setLotId(e.target.value)}
-                disabled={lots === null} helperText={lots && lots.length === 0 ? 'Nenhum lote com saldo dentro do hospital.' : ' '}>
-                {(lots || []).map((r) => (
-                  <MenuItem key={r.lotId} value={r.lotId}>
-                    {r.ref} · {r.lot} · Val. {formatDate(r.expiryDate)} · {r.hospitalQuantity} no hospital{r.expired ? ' · vencido' : ''}
-                  </MenuItem>
+              <Stack spacing={1.25}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>
+                  Lotes do item lido no hospital
+                </Typography>
+                {suggested === null ? (
+                  <Typography variant="body2" color="text.secondary">Carregando…</Typography>
+                ) : suggested.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Não foi possível identificar o item lido no hospital. Pesquise o lote ou a REF abaixo.
+                  </Typography>
+                ) : (
+                  <LotChoices options={suggested} value={lotId} onChange={setLotId} />
+                )}
+
+                <TextField size="small" label="Não está na lista? Pesquise por lote ou REF" value={search} autoComplete="off"
+                  onChange={(e) => setSearch(e.target.value)}
+                  InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+                  helperText={term.length === 1 ? 'Digite ao menos 2 caracteres.' : ' '} />
+                {term.length >= 2 && (found === null ? (
+                  <Typography variant="body2" color="text.secondary">Pesquisando…</Typography>
+                ) : found.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">Nenhum lote com saldo dentro do hospital para “{search.trim()}”.</Typography>
+                ) : (
+                  <>
+                    <LotChoices options={found.slice(0, MAX_RESULTS)} value={lotId} onChange={setLotId} />
+                    {found.length > MAX_RESULTS && (
+                      <Typography variant="caption" color="text.secondary">
+                        Mostrando {MAX_RESULTS} de {found.length}. Digite mais do lote ou da REF para refinar.
+                      </Typography>
+                    )}
+                  </>
                 ))}
-              </TextField>
+              </Stack>
             )}
             <TextField label={mode === 'RESOLVED' ? 'Observação (opcional)' : 'Justificativa'} required={mode === 'DISCARDED'}
               value={text} onChange={(e) => setText(e.target.value)} multiline minRows={2}

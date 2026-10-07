@@ -13,6 +13,17 @@ public interface PendingIssueRepository extends JpaRepository<PendingIssue, Long
     List<PendingIssue> findByStatusOrderByCreatedAtDesc(PendingIssueStatus status);
     List<PendingIssue> findBySurgeryIdOrderByIdAsc(Long surgeryId);
     long countBySurgeryIdAndStatus(Long surgeryId, PendingIssueStatus status);
+    long countByHospitalIdInAndStatus(java.util.Collection<Long> hospitalIds, PendingIssueStatus status);
+
+    /** Oldest surgery date among the pending issues of the given hospitals and status (dashboard), null when none. */
+    @Query("SELECT MIN(c.surgeryDate) FROM PendingIssue p JOIN p.surgery c WHERE p.hospital.id IN :hospitalIds AND p.status = :status")
+    java.time.LocalDate oldestSurgeryDate(@Param("hospitalIds") java.util.Collection<Long> hospitalIds,
+                                          @Param("status") PendingIssueStatus status);
+
+    /** Latest surgery date among the pending issues of the given hospitals and status (dashboard), null when none. */
+    @Query("SELECT MAX(c.surgeryDate) FROM PendingIssue p JOIN p.surgery c WHERE p.hospital.id IN :hospitalIds AND p.status = :status")
+    java.time.LocalDate latestSurgeryDate(@Param("hospitalIds") java.util.Collection<Long> hospitalIds,
+                                          @Param("status") PendingIssueStatus status);
 
     /** Pending issues of surgeries of the given hospitals with the surgery date in [start, end] (reports). */
     @Query("""

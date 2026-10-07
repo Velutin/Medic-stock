@@ -94,11 +94,20 @@ export function DeliveriesReport({ query }) {
   const { data } = useReport('/reports/deliveries', query);
   if (!data) return <Loading />;
   const download = (d) => downloadFile(d.pdfPath, `entrega-${d.number}.pdf`).catch((err) => notify.error(err));
-  return data.length === 0 ? <Empty>Nenhum relatório de entrega no período.</Empty> : (
+  if (data.length === 0) {
+    return <Empty>{query.lot ? `Nenhuma entrega com o lote ${query.lot} no período. Se necessário, amplie o período.` : 'Nenhum relatório de entrega no período.'}</Empty>;
+  }
+  return (
     <PagedTable items={data} rowKey={(r) => `${r.loan ? 'L' : 'D'}${r.id}`} minWidth={860}
       columns={[{ label: 'Nº' }, { label: 'Data' }, { label: 'Hospital' }, { label: 'Tipo' }, { label: 'Lotes', align: 'right' }, { label: 'Unidades', align: 'right' }, { label: 'Gerado por' }, { label: '' }]}
       row={(r) => (<>
-        <TableCell sx={mono}>{r.number}</TableCell><TableCell>{formatDateTime(r.createdAt)}</TableCell>
+        <TableCell sx={mono}>
+          {r.number}
+          {r.matchedLots?.map((m) => (
+            <Typography key={m} variant="caption" sx={{ display: 'block', color: tokens.primary, whiteSpace: 'nowrap' }}>{m}</Typography>
+          ))}
+        </TableCell>
+        <TableCell>{formatDateTime(r.createdAt)}</TableCell>
         <TableCell>{r.hospital}</TableCell>
         <TableCell>
           {r.loan ? <StatusChip tone="info">Empréstimo</StatusChip> : <StatusChip tone="neutral">Transferência</StatusChip>}

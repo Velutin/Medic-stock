@@ -6,6 +6,7 @@ import { isManager } from '../../auth/roles';
 import { useNotify } from '../../notifications/NotificationProvider';
 import { translateMessage } from '../../api/messages';
 import { readSheet } from './sheetReader';
+import { lotKey } from '../../utils/lot';
 
 export const todayIso = () => new Date().toLocaleDateString('sv-SE');
 const emptyForm = () => ({ hospitalId: '', patientName: '', surgeryDate: todayIso() });
@@ -213,10 +214,10 @@ export default function useSurgeryDraft() {
     loadOpen();
   };
 
-  /** Units already recorded in the surgery per lot number (to flag sheet labels already scanned). */
+  /** Units already recorded in the surgery per lot number, without leading zeros (to flag sheet labels already scanned). */
   const recordedByLot = useMemo(() => {
     const map = {};
-    (surgery?.items || []).forEach((i) => { map[i.lot] = (map[i.lot] || 0) + i.quantity; });
+    (surgery?.items || []).forEach((i) => { const k = lotKey(i.lot); map[k] = (map[k] || 0) + i.quantity; });
     return map;
   }, [surgery]);
 

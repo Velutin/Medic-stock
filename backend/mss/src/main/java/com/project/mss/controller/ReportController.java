@@ -85,9 +85,12 @@ public class ReportController {
     }
 
     @GetMapping("/deliveries")
-    @Operation(summary = "Delivery documents already generated in the period: transfers and loans delivered to hospitals (ADMIN)")
-    public List<DeliveryReportDTO> deliveries(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end, @RequestParam(required = false) Long hospitalId) {
-        return reportQueryService.deliveries(start, end, hospitalId);
+    @Operation(summary = "Delivery documents already generated in the period: transfers and loans delivered to hospitals (ADMIN)",
+               description = "With hospitalId, a loan is listed only for the hospital that received it. lot: part of the lot "
+                       + "number; only the documents with that lot are listed.")
+    public List<DeliveryReportDTO> deliveries(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end, @RequestParam(required = false) Long hospitalId,
+                                              @RequestParam(required = false) String lot) {
+        return reportQueryService.deliveries(start, end, hospitalId, lot);
     }
 
     @GetMapping("/consumption")

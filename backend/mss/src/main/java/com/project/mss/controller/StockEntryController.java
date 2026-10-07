@@ -17,7 +17,9 @@ import org.springframework.web.multipart.MultipartFile;
 import com.project.mss.dto.entry.EntryDTO;
 import com.project.mss.dto.entry.EntryFormDTO;
 import com.project.mss.dto.entry.EntryPreviewRowDTO;
+import com.project.mss.dto.entry.LotRefConflictDTO;
 import com.project.mss.service.ImportService;
+import com.project.mss.service.LotRefChangeService;
 import com.project.mss.service.StockEntryService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,10 +33,13 @@ public class StockEntryController {
 
     private final StockEntryService stockEntryService;
     private final ImportService importService;
+    private final LotRefChangeService lotRefChangeService;
 
-    public StockEntryController(StockEntryService stockEntryService, ImportService importService) {
+    public StockEntryController(StockEntryService stockEntryService, ImportService importService,
+                                LotRefChangeService lotRefChangeService) {
         this.stockEntryService = stockEntryService;
         this.importService = importService;
+        this.lotRefChangeService = lotRefChangeService;
     }
 
     @PostMapping
@@ -65,6 +70,15 @@ public class StockEntryController {
                        + "the material to be removed already left the storeroom.")
     public EntryDTO update(@PathVariable Long id, @RequestBody @Valid EntryFormDTO dto) {
         return stockEntryService.update(id, dto);
+    }
+
+    @PostMapping("/lot-conflicts")
+    @Operation(summary = "Lots with the same number registered with another REF, for each material + lot to receive",
+               description = "A lot number belongs to only one REF. Returns only the checks with conflicts; to receive "
+                       + "them, the entry item is sent with changeRef = true and those lots become its REF. Lots already "
+                       + "used in a surgery (usedInSurgery) cannot be changed.")
+    public List<LotRefConflictDTO> lotConflicts(@RequestBody @Valid List<LotRefConflictDTO.Check> checks) {
+        return lotRefChangeService.check(checks);
     }
 
     @PostMapping(value = "/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

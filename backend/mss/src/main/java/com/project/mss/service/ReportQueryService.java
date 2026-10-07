@@ -29,6 +29,7 @@ import com.project.mss.dto.stock.StockMovementDTO;
 import com.project.mss.dto.surgery.SurgeryDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.PendingIssue;
 import com.project.mss.model.entity.Stock;
 import com.project.mss.model.entity.Surgery;
@@ -225,25 +226,53 @@ public class ReportQueryService {
 
     // ============================================================ deliveries
 
+    /**
+     * Delivery documents in the period. A loan is a delivery only for the hospital that received it: with a hospital
+     * filter it appears for the destination, never for the hospital the material came from.
+     * lot: optional search (part of the lot number, case-insensitive); only documents with that lot are listed.
+     */
     @Transactional(readOnly = true)
-    public List<DeliveryReportDTO> deliveries(LocalDate start, LocalDate end, Long hospitalId) {
+    public List<DeliveryReportDTO> deliveries(LocalDate start, LocalDate end, Long hospitalId, String lot) {
         accessControlService.requireManager();
         Period p = Period.of(start, end);
         Set<Long> allowed = hospitals(hospitalId);
+        // Compared without leading zeros: 005706061 finds 5706061 and the other way around
+        String search = lot == null || lot.isBlank() ? null : Lot.comparableNumber(lot);
         List<DeliveryReportDTO> out = new ArrayList<>();
-        deliveryRepository.listForReport(allowed, p.from(), p.to()).forEach(d -> out.add(new DeliveryReportDTO(d.getId(),
-                String.valueOf(d.getId()), false, "/deliveries/" + d.getId() + "/pdf", d.getCreatedAt(), d.getHospital().getName(),
-                d.getSourceHospital() == null ? null : d.getSourceHospital().getName(), d.getItems().size(),
-                d.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(d.getCreatedBy()))));
+        for (var d : deliveryRepository.listForReport(allowed, p.from(), p.to())) {
+            List<String> matched = matchedLots(search, d.getItems().stream().map(i -> new LotQuantity(i.getLot(), i.getQuantity())).toList());
+            if (search != null && matched.isEmpty()) continue;
+            out.add(new DeliveryReportDTO(d.getId(), String.valueOf(d.getId()), false, "/deliveries/" + d.getId() + "/pdf",
+                    d.getCreatedAt(), d.getHospital().getName(),
+                    d.getSourceHospital() == null ? null : d.getSourceHospital().getName(), d.getItems().size(),
+                    d.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(d.getCreatedBy()), matched));
+        }
         // Loans are delivered to the hospital as deliveries: they are listed here too, for auditing in one place
-        loanRepository.listForReport(LoanType.LOAN, p.from(), p.to()).stream()
-                .filter(l -> allowed.contains(l.getDestinationHospital().getId()) || allowed.contains(l.getSourceHospital().getId()))
-                .forEach(l -> out.add(new DeliveryReportDTO(l.getId(), "E-" + l.getId(), true, "/loans/" + l.getId() + "/pdf",
-                        l.getCreatedAt(), l.getDestinationHospital().getName(),
-                        l.getSourceHospital().getName() + (l.getSourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)"),
-                        l.getItems().size(), l.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(l.getCreatedBy()))));
+        for (var l : loanRepository.listForReport(LoanType.LOAN, p.from(), p.to())) {
+            boolean visible = hospitalId != null
+                    ? allowed.contains(l.getDestinationHospital().getId())
+                    : allowed.contains(l.getDestinationHospital().getId()) || allowed.contains(l.getSourceHospital().getId());
+            if (!visible) continue;
+            List<String> matched = matchedLots(search, l.getItems().stream().map(i -> new LotQuantity(i.getLot(), i.getQuantity())).toList());
+            if (search != null && matched.isEmpty()) continue;
+            out.add(new DeliveryReportDTO(l.getId(), "E-" + l.getId(), true, "/loans/" + l.getId() + "/pdf",
+                    l.getCreatedAt(), l.getDestinationHospital().getName(),
+                    l.getSourceHospital().getName() + (l.getSourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)"),
+                    l.getItems().size(), l.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(l.getCreatedBy()), matched));
+        }
         out.sort(Comparator.comparing(DeliveryReportDTO::createdAt).reversed());
         return out;
+    }
+
+    private record LotQuantity(Lot lot, int quantity) { }
+
+    /** Items whose lot number contains the search, as "REF · lot · quantity un."; empty without search. */
+    private static List<String> matchedLots(String search, List<LotQuantity> items) {
+        if (search == null) return List.of();
+        return items.stream()
+                .filter(i -> Lot.comparableNumber(i.lot().getNumber()).contains(search))
+                .map(i -> i.lot().getMaterial().getRef() + " · " + i.lot().getNumber() + " · " + i.quantity() + " un.")
+                .toList();
     }
 
     // ============================================================ consumption

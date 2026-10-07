@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import useHospitals from '../../hooks/useHospitals';
 import { daysUntil, formatDate } from '../../utils/format';
+import { sameLot } from '../../utils/lot';
 
 /** Today in the local time zone, as yyyy-mm-dd. */
 export const todayIso = () => new Date().toLocaleDateString('sv-SE');
@@ -50,28 +51,77 @@ export default function useEntryDraft() {
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
+  const [refConflict, setRefConflict] = useState(null);
 
   const setField = useCallback((field, value) => setDraft((d) => ({ ...d, [field]: value })), []);
 
   /** Adds a lot; the same material + lot + expiry date already in the list is summed (as the API does). */
-  const addItem = useCallback(({ material, lot, expiryDate, quantity, monthOnly = false }) => {
+  const addItem = useCallback(({ material, lot, expiryDate, quantity, monthOnly = false, changeRef = false }) => {
     const lotNumber = lot.trim().toUpperCase();
     const qty = Number(quantity);
     setDraft((d) => {
-      const same = d.items.find((i) => i.materialId === material.id && i.lot === lotNumber && i.expiryDate === expiryDate);
+      const same = d.items.find((i) => i.materialId === material.id && sameLot(i.lot, lotNumber) && i.expiryDate === expiryDate);
       if (same) {
-        return { ...d, items: d.items.map((i) => (i === same ? { ...i, quantity: i.quantity + qty } : i)) };
+        return { ...d, items: d.items.map((i) => (i === same ? { ...i, quantity: i.quantity + qty, changeRef: i.changeRef || changeRef } : i)) };
       }
       return {
         ...d,
         items: [...d.items, {
           key: nextKey++, materialId: material.id, ref: material.ref, description: material.description,
           component: material.component, size: material.size, color: material.color,
-          lot: lotNumber, expiryDate, quantity: qty, monthOnly,
+          lot: lotNumber, expiryDate, quantity: qty, monthOnly, changeRef,
         }],
       };
     });
   }, []);
+
+  /**
+   * Rule: a lot number belongs to only one REF. Before adding, checks the list and the API: a number already in the
+   * list with another REF is refused; a number registered with another REF opens `refConflict` (LotRefChangeDialog),
+   * and the items enter only after the user confirms the REF change.
+   * Returns { problem } when refused, otherwise { added, waiting } (waiting: items held for the dialog).
+   */
+  const requestAdd = async (lines) => {
+    const list = [...draft.items];
+    const ready = [];
+    const toCheck = [];
+    for (const line of lines) {
+      const lot = line.lot.trim().toUpperCase();
+      const other = [...list, ...ready, ...toCheck].find((i) => sameLot(i.lot, lot)
+        && (i.materialId ?? i.material?.id) !== line.material.id);
+      if (other) {
+        return { problem: `O lote ${lot} já está nesta entrada com a REF ${other.ref ?? other.material?.ref}. Um lote pertence a uma única REF: corrija um dos dois.` };
+      }
+      // REF change of this number already confirmed for this material in the list
+      const confirmed = list.some((i) => sameLot(i.lot, lot) && i.materialId === line.material.id && i.changeRef);
+      (confirmed ? ready : toCheck).push({ ...line, changeRef: confirmed || Boolean(line.changeRef) });
+    }
+    let conflicts = [];
+    if (toCheck.length) {
+      conflicts = await api('/stock-entries/lot-conflicts', {
+        method: 'POST', body: toCheck.map((i) => ({ materialId: i.material.id, lot: i.lot.trim().toUpperCase() })),
+      });
+    }
+    const conflictOf = (i) => conflicts.find((c) => c.materialId === i.material.id && c.lot === i.lot.trim().toUpperCase());
+    [...ready, ...toCheck.filter((i) => !conflictOf(i))].forEach(addItem);
+    const waiting = toCheck.filter(conflictOf);
+    if (waiting.length) setRefConflict({ items: waiting, conflicts: conflicts.filter((c) => waiting.some((i) => conflictOf(i) === c)) });
+    return { added: lines.length - waiting.length, waiting: waiting.length };
+  };
+
+  /** REF change confirmed: the items whose lots can change REF enter flagged; the blocked ones stay out. */
+  const confirmRefChange = useCallback(() => {
+    if (!refConflict) return 0;
+    const allowed = refConflict.items.filter((i) => {
+      const c = refConflict.conflicts.find((x) => x.materialId === i.material.id && x.lot === i.lot.trim().toUpperCase());
+      return c && !c.lots.some((l) => l.usedInSurgery);
+    });
+    allowed.forEach((i) => addItem({ ...i, changeRef: true }));
+    setRefConflict(null);
+    return allowed.length;
+  }, [refConflict, addItem]);
+
+  const cancelRefChange = useCallback(() => setRefConflict(null), []);
 
   const removeItem = useCallback((key) => setDraft((d) => ({ ...d, items: d.items.filter((i) => i.key !== key) })), []);
 
@@ -114,8 +164,8 @@ export default function useEntryDraft() {
       hospitalId: draft.hospitalId,
       entryDate: draft.entryDate,
       notes: draft.notes.trim() || null,
-      items: draft.items.map(({ materialId, lot, expiryDate, quantity, monthOnly }) => ({
-        materialId, lot, expiryDate, quantity, monthOnly: Boolean(monthOnly),
+      items: draft.items.map(({ materialId, lot, expiryDate, quantity, monthOnly, changeRef }) => ({
+        materialId, lot, expiryDate, quantity, monthOnly: Boolean(monthOnly), changeRef: Boolean(changeRef),
       })),
     };
     setSaving(true);
@@ -132,7 +182,8 @@ export default function useEntryDraft() {
   };
 
   return {
-    destinations, loadingHospitals, draft, setField, addItem, removeItem, totals,
+    destinations, loadingHospitals, draft, setField, addItem, requestAdd, refConflict, confirmRefChange, cancelRefChange,
+    removeItem, totals,
     editing, startEdit, reset, headerError, save, saving, historyKey,
   };
 }

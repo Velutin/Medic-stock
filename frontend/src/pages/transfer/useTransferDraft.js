@@ -4,6 +4,7 @@ import { downloadFile } from '../../api/download';
 import { readCode } from '../../api/scan';
 import useHospitals from '../../hooks/useHospitals';
 import { useNotify } from '../../notifications/NotificationProvider';
+import { sameLot } from '../../utils/lot';
 
 /**
  * Storeroom -> hospital transfer (delivery), shared by the computer and phone versions.
@@ -136,10 +137,10 @@ export default function useTransferDraft(prefill) {
     }
     const typed = code.trim().toUpperCase();
     const candidates = scan.lot
-      ? rows.filter((r) => r.lot === scan.lot
+      ? rows.filter((r) => sameLot(r.lot, scan.lot)
           && (!scan.material || r.materialId === scan.material.id)
           && (!scan.expiryDate || r.expiryDate === scan.expiryDate))
-      : rows.filter((r) => r.lot === typed);
+      : rows.filter((r) => sameLot(r.lot, typed));
 
     if (candidates.length === 0) {
       if (!scan.lot && scan.material) {

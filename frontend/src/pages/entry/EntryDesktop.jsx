@@ -18,6 +18,7 @@ import MaterialLabel from './MaterialLabel';
 import EntryHistory from './EntryHistory';
 import EntryImportDialog from './EntryImportDialog';
 import ExpiryField from './ExpiryField';
+import LotRefChangeDialog from './LotRefChangeDialog';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -44,11 +45,38 @@ export default function EntryDesktop({ entry }) {
     else if (result.material) quantityInput.current?.focus();
   };
 
-  const add = () => {
+  /**
+   * Adds the lines after the one-REF-per-lot check. A lot registered with another REF opens the REF change dialog;
+   * the item typed stays in the form until the dialog is answered (cancel: fix the REF and add again).
+   */
+  const addLines = async (lines) => {
+    try {
+      const result = await entry.requestAdd(lines);
+      if (result.problem) notify.warning(result.problem);
+      return result;
+    } catch (err) {
+      notify.error(err);
+      return { problem: true };
+    }
+  };
+
+  const add = async () => {
     if (!reader.validate()) return;
-    entry.addItem(item);
+    const result = await addLines([item]);
+    if (result.problem || result.waiting) return;
     reader.clear();
     codeInput.current?.focus();
+  };
+
+  const confirmRefChange = () => {
+    const added = entry.confirmRefChange();
+    if (added) {
+      notify.success(added === 1 ? 'REF dos lotes trocada: item adicionado à entrada.' : `REF dos lotes trocada: ${added} itens adicionados à entrada.`);
+      reader.clear();
+      codeInput.current?.focus();
+    } else {
+      notify.warning('Nenhum item foi adicionado: o lote já saiu em cirurgia com a REF atual. Confira a REF do item.');
+    }
   };
 
   const fix = (line) => {
@@ -213,7 +241,9 @@ export default function EntryDesktop({ entry }) {
         onClose={() => setNewItemOpen(false)}
         onSaved={(saved) => { setNewItemOpen(false); reader.applyMaterial(saved); quantityInput.current?.focus(); }} />
       <EntryImportDialog open={importOpen} onClose={() => setImportOpen(false)}
-        onAdd={(lines) => { lines.forEach(entry.addItem); setImportOpen(false); }} />
+        onAdd={async (lines) => { if (!(await addLines(lines)).problem) setImportOpen(false); }} />
+      <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
+        onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
     </>
   );
 }

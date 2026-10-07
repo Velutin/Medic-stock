@@ -14,12 +14,14 @@ import com.project.mss.dto.dashboard.DashboardDTO;
 import com.project.mss.dto.replenishment.ReplenishmentSuggestionDTO;
 import com.project.mss.dto.stock.StockMovementDTO;
 import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.repository.HospitalRepository;
+import com.project.mss.repository.PendingIssueRepository;
 import com.project.mss.repository.StockMovementRepository;
 import com.project.mss.repository.StockRepository;
 import com.project.mss.repository.SurgeryRepository;
 
-/** Administrator's dashboard: stock indicators, the closing week, replenishment alerts and latest movements. */
+/** Administrator's dashboard: stock indicators, the closing week, open pending issues, replenishment alerts and latest movements. */
 @Service
 public class DashboardService {
 
@@ -30,16 +32,18 @@ public class DashboardService {
     private final SurgeryRepository surgeryRepository;
     private final StockMovementRepository stockMovementRepository;
     private final HospitalRepository hospitalRepository;
+    private final PendingIssueRepository pendingIssueRepository;
     private final ReplenishmentService replenishmentService;
     private final AccessControlService accessControlService;
 
     public DashboardService(StockRepository stockRepository, SurgeryRepository surgeryRepository,
                             StockMovementRepository stockMovementRepository, HospitalRepository hospitalRepository,
-                            ReplenishmentService replenishmentService, AccessControlService accessControlService) {
+                            PendingIssueRepository pendingIssueRepository, ReplenishmentService replenishmentService, AccessControlService accessControlService) {
         this.stockRepository = stockRepository;
         this.surgeryRepository = surgeryRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.hospitalRepository = hospitalRepository;
+        this.pendingIssueRepository = pendingIssueRepository;
         this.replenishmentService = replenishmentService;
         this.accessControlService = accessControlService;
     }
@@ -56,7 +60,7 @@ public class DashboardService {
         LocalDate weekEnd = weekStart.plusDays(6);
 
         if (hospitals.isEmpty()) {
-            return new DashboardDTO(weekStart, weekEnd, 0, 0, 0, 0, List.of(), List.of(), List.of());
+            return new DashboardDTO(weekStart, weekEnd, 0, 0, 0, 0, 0, null, null, List.of(), List.of(), List.of());
         }
 
         long units = stockRepository.sumValidUnits(hospitals, today);
@@ -68,6 +72,10 @@ public class DashboardService {
                 .map(r -> new DashboardDTO.HospitalSurgeries((Long) r[0], (String) r[1], (Long) r[2]))
                 .toList();
         long weekSurgeries = byHospital.stream().mapToLong(DashboardDTO.HospitalSurgeries::surgeries).sum();
+
+        long pending = pendingIssueRepository.countByHospitalIdInAndStatus(hospitals, PendingIssueStatus.OPEN);
+        LocalDate oldestPending = pending > 0 ? pendingIssueRepository.oldestSurgeryDate(hospitals, PendingIssueStatus.OPEN) : null;
+        LocalDate latestPending = pending > 0 ? pendingIssueRepository.latestSurgeryDate(hospitals, PendingIssueStatus.OPEN) : null;
 
         List<DashboardDTO.ReplenishmentAlert> alerts = new ArrayList<>();
         for (Hospital h : hospitalRepository.findAllById(hospitals)) {
@@ -84,6 +92,7 @@ public class DashboardService {
                 .latest(hospitals, PageRequest.of(0, RECENT_MOVEMENTS)).stream()
                 .map(StockMovementDTO::of).toList();
 
-        return new DashboardDTO(weekStart, weekEnd, units, expiring, expired, weekSurgeries, byHospital, alerts, movements);
+        return new DashboardDTO(weekStart, weekEnd, units, expiring, expired, weekSurgeries,
+                pending, oldestPending, latestPending, byHospital, alerts, movements);
     }
 }

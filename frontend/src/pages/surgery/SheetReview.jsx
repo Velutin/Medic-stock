@@ -6,6 +6,7 @@ import {
 import StatusChip from '../../components/StatusChip';
 import { formatDate } from '../../utils/format';
 import { tokens } from '../../theme';
+import { lotKey } from '../../utils/lot';
 
 const STATUS = {
   OK: { tone: 'success', label: 'Pronto' },
@@ -31,7 +32,7 @@ export default function SheetReview({ rows, recordedByLot, busy, onCancel, onCon
     const seen = {};
     const initial = {};
     rows.forEach((r) => {
-      const lot = r.preview?.lot || r.lot;
+      const lot = lotKey(r.preview?.lot || r.lot);
       seen[lot] = (seen[lot] || 0) + 1;
       const already = lot && (recordedByLot[lot] || 0) >= seen[lot];
       initial[r.key] = { include: !already, already, lotId: '', typed: '' };

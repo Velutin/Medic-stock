@@ -135,6 +135,12 @@ const PATTERNS = [
   [/^Lot (\S+) \(REF (.+)\) has more than one expiry date in (\d{2}\/\d{4}): type the full date \(DD\/MM\/AAAA\) or read the QR code$/,
     (m) => `O lote ${m[1]} (REF ${m[2]}) tem mais de uma validade em ${m[3]}: digite a data completa (DD/MM/AAAA) ou leia o QR code.`],
   [/^Lot (\S+) is expired and cannot be delivered$/, (m) => `O lote ${m[1]} está vencido e não pode ser transferido.`],
+  [/^Lot (\S+) appears with more than one REF in this entry: a lot number belongs to only one REF$/,
+    (m) => `O lote ${m[1]} aparece com mais de uma REF nesta entrada. Cada lote pertence a uma única REF.`],
+  [/^Lot (\S+) is already registered with REF (.+): confirm the REF change of those lots to receive it$/,
+    (m) => `O lote ${m[1]} já está cadastrado com a REF ${m[2]}. Confirme a troca de REF desses lotes para dar entrada.`],
+  [/^Lot (\S+) \(REF (.+)\) was already used in a surgery and its REF cannot be changed: check the REF of the item$/,
+    (m) => `O lote ${m[1]} (REF ${m[2]}) já saiu em cirurgia e não pode mudar de REF. Confira a REF do item.`],
   [/^Lot (\S+) \(REF (.+)\) of entry #(\d+) already left the storeroom of (.+): available (\d+), the correction removes (\d+)$/,
     (m) => `O lote ${m[1]} (REF ${m[2]}) da entrada #${m[3]} já saiu da sala de ${m[4]}: há ${m[5]} na sala e a correção retira ${m[6]}. `
       + 'Corrija a transferência ou faça um ajuste de inventário antes.'],
