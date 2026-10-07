@@ -131,9 +131,6 @@ public class User implements UserDetails {
         roles.add(newRole);
     }
 
-    public void removeRole(Role role) {
-        roles.remove(role);
-    }
 
     public boolean hasAnyRole(String... names) {
         for (Role r : roles) {

@@ -148,8 +148,4 @@ public class ReplenishmentService {
         }
         return out;
     }
-
-    private int sumValid(List<Stock> items, LocalDate today) {
-        return items.stream().filter(e -> !e.getLot().isExpired(today)).mapToInt(Stock::getQuantity).sum();
-    }
 }

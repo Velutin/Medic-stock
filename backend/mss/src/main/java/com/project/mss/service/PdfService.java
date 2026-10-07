@@ -99,7 +99,6 @@ public class PdfService {
     ) { }
 
     private static final Color TEXT_MUTED = new Color(0x6B, 0x6B, 0x6B);
-    private static final Color BORDER = new Color(0xBF, 0xBF, 0xBF);
 
     /**
      * Delivery report, Classic layout: logo, title and number; boxes with hospital, date,
@@ -577,37 +576,6 @@ public class PdfService {
             cell.addElement(new Paragraph(companyName.toUpperCase(), FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16)));
         }
         return cell;
-    }
-
-    private PdfPCell infoBox(String label, String value, Font fLabel, Font fValue) {
-        PdfPCell cell = new PdfPCell();
-        cell.setBorderColor(BORDER);
-        cell.setPadding(6);
-        cell.addElement(new Paragraph(label, fLabel));
-        cell.addElement(new Paragraph(value == null || value.isBlank() ? "-" : value, fValue));
-        return cell;
-    }
-
-    /** Signature lines side by side, label below each line (no separate date line). */
-    private void addSignatureLines(Document doc, String[] labels, Font font) throws Exception {
-        PdfPTable signatures = new PdfPTable(labels.length);
-        signatures.setWidthPercentage(100);
-        signatures.setSpacingBefore(45);
-        signatures.setKeepTogether(true);
-        for (String label : labels) {
-            PdfPCell c = new PdfPCell();
-            c.setBorder(Rectangle.NO_BORDER);
-            c.setPaddingLeft(14);
-            c.setPaddingRight(14);
-            Paragraph line = new Paragraph("________________________________________", font);
-            line.setAlignment(Element.ALIGN_CENTER);
-            Paragraph name = new Paragraph(label, font);
-            name.setAlignment(Element.ALIGN_CENTER);
-            c.addElement(line);
-            c.addElement(name);
-            signatures.addCell(c);
-        }
-        doc.add(signatures);
     }
 
     /** Footer on every page: issue date on the left, "Página X de Y" on the right. */
