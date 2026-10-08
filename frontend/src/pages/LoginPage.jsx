@@ -9,6 +9,15 @@ import AuthShell from './AuthShell';
 import { useAuth } from '../auth/AuthProvider';
 import { homeFor } from '../layout/menu';
 
+/**
+ * Page the user was trying to open before the login, used to send them back to it afterwards.
+ * Only an internal path is accepted: it must start with a single "/" and carry no backslash, which some
+ * parsers read as the second slash of "//another-site". Anything else falls back to the home page of the
+ * profile, so a prepared link cannot send the user out of the system right after signing in.
+ */
+const safePath = (path, fallback) =>
+  (typeof path === 'string' && /^\/(?!\/)[^\\\s]*$/.test(path) ? path : fallback);
+
 export default function LoginPage() {
   const { user, login, expiredMessage, clearExpired } = useAuth();
   const navigate = useNavigate();
@@ -23,7 +32,7 @@ export default function LoginPage() {
 
   useEffect(() => () => clearExpired(), [clearExpired]);
 
-  if (user) return <Navigate to={location.state?.from || homeFor(user)} replace />;
+  if (user) return <Navigate to={safePath(location.state?.from, homeFor(user))} replace />;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -37,7 +46,7 @@ export default function LoginPage() {
     setSending(true);
     try {
       const logged = await login(email.trim(), password, rememberMe);
-      navigate(location.state?.from || homeFor(logged), { replace: true });
+      navigate(safePath(location.state?.from, homeFor(logged)), { replace: true });
     } catch (err) {
       setFields(err.fields || {});
       setError(err.message);

@@ -66,5 +66,12 @@ export async function api(path, { method = 'GET', body, query, blob = false, ski
   if (blob) return response.blob();
   if (response.status === 204 || response.status === 202) return null;
   const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (notJson) {
+    // The operation succeeded; the answer just has no JSON to read. Breaking the screen here would report
+    // a failure for something that was already recorded.
+    return null;
+  }
 }

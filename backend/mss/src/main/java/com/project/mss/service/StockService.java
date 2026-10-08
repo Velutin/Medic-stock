@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +43,13 @@ import com.project.mss.repository.MinimumStockRepository;
  */
 @Service
 public class StockService {
+
+    /**
+     * Rows an export may carry at most. The screen is paginated; the file is not, and a stock with every
+     * hospital and every lot would otherwise be built whole in memory. The title of the sheet says when the
+     * list was cut, so nobody takes a cut file for a complete one.
+     */
+    private static final int MAX_EXPORT_ROWS = 20000;
 
     private final StockRepository stockRepository;
     private final StockMovementRepository stockMovementRepository;
@@ -215,6 +223,18 @@ public class StockService {
         stockMovementRepository.save(m);
     }
 
+    /**
+     * Lot number or expiry date corrected by an administrator. Nothing moves: the row exists so the change
+     * of identity is visible in the history, with what the lot was and what it became.
+     */
+    @Transactional
+    public StockMovement recordLotCorrection(Lot lot, String before, String after, String reason) {
+        StockMovement m = newMovement(MovementType.LOT_CORRECTION, lot, 0);
+        String notes = "Lot corrected from " + before + " to " + after + ". " + reason;
+        m.setNotes(notes.length() > 1000 ? notes.substring(0, 1000) : notes);
+        return stockMovementRepository.save(m);
+    }
+
     /** A distribution center only keeps material in the storeroom. */
     public static void requireValidLocation(Hospital hospital, Location location) {
         if (hospital.isDistributionCenter() && location == Location.HOSPITAL) {
@@ -349,6 +369,30 @@ public class StockService {
         if (hospitals.isEmpty()) return Page.empty(pageable);
         String t = term == null || term.isBlank() ? null : term.trim();
         return stockRepository.searchLots(hospitals, t, pageable);
+    }
+
+    /**
+     * Stock inside the storerooms, lot by lot (administrators): what is waiting to be transferred, including
+     * the storeroom of a distribution center. Only lots with balance in the storeroom are listed, so the
+     * hospital quantity of each row comes back as zero.
+     */
+    @Transactional(readOnly = true)
+    public Page<LotStockDTO> searchStoreroomLots(String term, Long hospitalId, Pageable pageable) {
+        accessControlService.requireManager();
+        java.util.Set<Long> hospitals = hospitalId != null
+                ? java.util.Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
+                : accessControlService.allowedHospitals();
+        if (hospitals.isEmpty()) return Page.empty(pageable);
+        String t = term == null || term.isBlank() ? null : term.trim();
+        return stockRepository.searchLotsAt(hospitals, t, Location.STOREROOM, pageable);
+    }
+
+    /** Rows of a stock-by-lot export: the same search of the screen, so file and screen never disagree. */
+    @Transactional(readOnly = true)
+    public Page<LotStockDTO> lotsForExport(String term, Long hospitalId, Location location) {
+        Pageable page = PageRequest.of(0, MAX_EXPORT_ROWS);
+        return location == Location.STOREROOM ? searchStoreroomLots(term, hospitalId, page)
+                : searchLots(term, hospitalId, page);
     }
 
     @Transactional(readOnly = true)

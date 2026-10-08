@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.stock.LotBalanceDTO;
+import com.project.mss.dto.stock.LotCorrectionDTO;
 import com.project.mss.dto.material.LotDTO;
 import com.project.mss.dto.material.MaterialDTO;
 import com.project.mss.dto.material.MaterialFormDTO;
@@ -18,6 +19,7 @@ import com.project.mss.dto.material.ScannedCodeDTO;
 import com.project.mss.service.StockService;
 import com.project.mss.service.MaterialService;
 import com.project.mss.service.LotScanService;
+import com.project.mss.service.LotCorrectionService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,12 +33,14 @@ public class MaterialController {
     private final MaterialService materialService;
     private final StockService stockService;
     private final LotScanService lotScanService;
+    private final LotCorrectionService lotCorrectionService;
 
     public MaterialController(MaterialService materialService, StockService stockService,
-                              LotScanService lotScanService) {
+                              LotScanService lotScanService, LotCorrectionService lotCorrectionService) {
         this.materialService = materialService;
         this.stockService = stockService;
         this.lotScanService = lotScanService;
+        this.lotCorrectionService = lotCorrectionService;
     }
 
     @GetMapping
@@ -69,6 +73,16 @@ public class MaterialController {
     @Operation(summary = "Search lots by number")
     public List<LotDTO> findLots(@RequestParam String number) {
         return materialService.findLots(number);
+    }
+
+    @PutMapping("/lots/{lotId}")
+    @Operation(summary = "Corrects the lot number and expiry date, and the counted balance of the line (ADMIN)",
+               description = "A lot is shared by every hospital: the number and the date are corrected wherever "
+                       + "it appears. When the corrected identity already exists in the same REF, the two lots "
+                       + "are merged.")
+    public ResponseEntity<Void> correctLot(@PathVariable Long lotId, @RequestBody @Valid LotCorrectionDTO dto) {
+        lotCorrectionService.correct(lotId, dto);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/lots/{lotId}/balances")

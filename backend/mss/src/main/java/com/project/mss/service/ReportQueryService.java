@@ -525,6 +525,7 @@ public class ReportQueryService {
             case SURGERY_REVERSAL -> "Estorno de cirurgia";
             case LOAN -> "Empréstimo";
             case SUPPLIER_RETURN -> "Devolução à Baumer";
+            case LOT_CORRECTION -> "Correção de lote";
         };
     }
 }
