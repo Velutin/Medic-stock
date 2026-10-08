@@ -185,7 +185,7 @@ function ReturnsReport({ query }) {
 export const MOVEMENT_TYPES = {
   ENTRY: 'Entrada', ENTRY_CORRECTION: 'Correção de entrada', INVENTORY_ADJUSTMENT: 'Ajuste de inventário',
   REPLENISHMENT: 'Transferência', SURGERY_WITHDRAWAL: 'Saída em cirurgia', SURGERY_REVERSAL: 'Estorno de cirurgia',
-  LOAN: 'Empréstimo', SUPPLIER_RETURN: 'Devolução à Baumer',
+  LOAN: 'Empréstimo', SUPPLIER_RETURN: 'Devolução à Baumer', LOT_CORRECTION: 'Correção de lote',
 };
 
 /** Every stock movement in the period. */

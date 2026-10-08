@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,9 +25,11 @@ import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFFont;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.stock.LotStockDTO;
 import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.report.WeeklySurgeriesDTO;
 import com.project.mss.exception.BusinessRuleException;
@@ -247,6 +250,95 @@ public class ReportService {
                 for (int i = 0; i < v.length; i++) {
                     var cell = row.createCell(i);
                     if (v[i] instanceof Integer num) cell.setCellValue(num);
+                    else cell.setCellValue(v[i] == null ? "" : v[i].toString());
+                    cell.setCellStyle(style);
+                }
+            }
+            for (int i = 0; i < header.length; i++) sh.autoSizeColumn(i);
+            sh.createFreezePane(0, 3);
+            wb.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new BusinessRuleException("Failed to generate spreadsheet: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Stock by lot as Excel, exactly what the screen is showing: the same search and the same hospital filter,
+     * so the file and the tab never disagree. location HOSPITAL is the "by lot" tab (balance inside the
+     * hospital, with the storeroom alongside); STOREROOM is the "in the storeroom" tab.
+     *
+     * The first columns keep the order of the spreadsheet this export replaces (REF to Total) and the sheet of
+     * the hospital view keeps its name, so a formula pointing at a column or at the sheet still works; the new
+     * columns come after. Expired lots are included - in the storeroom they are exactly what has to go back to
+     * the supplier - and the expiry columns say which they are.
+     */
+    @Transactional(readOnly = true)
+    public byte[] lotSpreadsheet(String term, Long hospitalId, Location location, boolean misplaced) {
+        boolean storeroom = location == Location.STOREROOM;
+        Page<LotStockDTO> page = stockService.lotsForExport(term, hospitalId, location, misplaced);
+        List<LotStockDTO> rows = page.getContent();
+        String place = hospitalId == null ? (storeroom ? "Todas as salas" : "Todos os hospitais")
+                : accessControlService.requireHospitalAccess(hospitalId).getName();
+
+        String[] header = storeroom
+                ? new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "Na sala",
+                               "Situação", "Dias para vencer", "Sala"}
+                : new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
+                               "Na sala", "Total", "Situação", "Dias para vencer", "Hospital"};
+
+        try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            XSSFSheet sh = wb.createSheet(storeroom ? "Estoque na sala" : "Estoque");
+
+            XSSFFont bold = wb.createFont();
+            bold.setBold(true);
+            XSSFCellStyle headerStyle = wb.createCellStyle();
+            headerStyle.setFont(bold);
+            headerStyle.setFillForegroundColor(new XSSFColor(new byte[]{(byte) 0xD9, (byte) 0xD9, (byte) 0xD9}, null));
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            borders(headerStyle);
+
+            // The title records what produced the file: where, the search used and, if it was cut, that it was
+            StringBuilder titleText = new StringBuilder(storeroom
+                    ? (misplaced ? "Saldo em sala de hospital atendido por centro de distribuição - " : "Estoque na sala - ")
+                    : "Estoque por lote - ")
+                    .append(place).append(" - ").append(LocalDate.now().format(DATE));
+            if (term != null && !term.isBlank()) titleText.append(" - busca: ").append(term.trim());
+            if (page.getTotalElements() > rows.size()) {
+                titleText.append(" - mostrando as ").append(rows.size()).append(" primeiras de ")
+                        .append(page.getTotalElements()).append(" linhas");
+            }
+            Row title = sh.createRow(0);
+            title.createCell(0).setCellValue(titleText.toString());
+            title.getCell(0).setCellStyle(headerStyle);
+
+            Row head = sh.createRow(2);
+            for (int i = 0; i < header.length; i++) {
+                head.createCell(i).setCellValue(header[i]);
+                head.getCell(i).setCellStyle(headerStyle);
+            }
+
+            Map<String, XSSFCellStyle> stylesByColor = new HashMap<>();
+            XSSFCellStyle defaultStyle = wb.createCellStyle();
+            borders(defaultStyle);
+
+            LocalDate today = LocalDate.now();
+            int n = 3;
+            for (LotStockDTO l : rows) {
+                long daysLeft = ChronoUnit.DAYS.between(today, l.expiryDate());
+                String status = daysLeft < 0 ? "Vencido" : daysLeft <= 30 ? "Vence em até 30 dias" : "Válido";
+                Object[] v = storeroom
+                        ? new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
+                                       l.expiryDate().format(DATE), l.storeroomQuantity(), status, daysLeft, l.hospital()}
+                        : new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
+                                       l.expiryDate().format(DATE), l.hospitalQuantity(), l.storeroomQuantity(),
+                                       l.hospitalQuantity() + l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                XSSFCellStyle style = l.color() == null ? defaultStyle
+                        : stylesByColor.computeIfAbsent(l.color(), color -> colorStyle(wb, color));
+                Row row = sh.createRow(n++);
+                for (int i = 0; i < v.length; i++) {
+                    var cell = row.createCell(i);
+                    if (v[i] instanceof Number num) cell.setCellValue(num.doubleValue());
                     else cell.setCellValue(v[i] == null ? "" : v[i].toString());
                     cell.setCellStyle(style);
                 }

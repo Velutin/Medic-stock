@@ -18,6 +18,7 @@ import com.project.mss.dto.stock.StockSummaryDTO;
 import com.project.mss.dto.stock.MaterialStockDTO;
 import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.stock.StockMovementDTO;
+import com.project.mss.model.enums.Location;
 import com.project.mss.service.StockService;
 import com.project.mss.service.ReportService;
 
@@ -63,6 +64,19 @@ public class StockController {
         return stockService.searchLots(term, hospitalId, pageable);
     }
 
+    @GetMapping("/storeroom")
+    @Operation(summary = "Stock inside the storerooms, lot by lot (ADMIN)",
+               description = "What is waiting to be transferred into the hospitals, including the storeroom of a "
+                       + "distribution center. Without hospitalId, searches every storeroom the user can see. term "
+                       + "matches lot number, REF, name, description or GTIN. Only lots with balance in the "
+                       + "storeroom are listed, so hospitalQuantity comes back as zero. Paginated.")
+    public Page<LotStockDTO> storeroom(@RequestParam(required = false) String term,
+                                       @RequestParam(required = false) Long hospitalId,
+                                       @RequestParam(defaultValue = "false") boolean misplaced,
+                                       @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
+        return stockService.searchStoreroomLots(term, hospitalId, misplaced, pageable);
+    }
+
     @GetMapping("/material")
     @Operation(summary = "Stock of the materials matching a REF, name or description, per hospital and lot",
                description = "Partial match: '1032' returns every REF containing 1032; empty returns the whole catalog. "
@@ -73,6 +87,29 @@ public class StockController {
                                                 @RequestParam(defaultValue = "false") boolean includeExpired,
                                                 @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
         return stockService.materialStock(term, hospitalId, includeExpired, pageable);
+    }
+
+    @GetMapping("/lots/xlsx")
+    @Operation(summary = "Download the stock by lot as Excel, with the same filters of the screen",
+               description = "Takes the same term and hospitalId of GET /stock/lots, so the file matches what the "
+                       + "screen is showing, including expired lots. Without hospitalId, every hospital the user "
+                       + "can see. Rows carry the size identification color.")
+    public ResponseEntity<byte[]> lotsSpreadsheet(@RequestParam(required = false) String term,
+                                                  @RequestParam(required = false) Long hospitalId) {
+        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.HOSPITAL, false),
+                "estoque-por-lote.xlsx");
+    }
+
+    @GetMapping("/storeroom/xlsx")
+    @Operation(summary = "Download the storeroom stock as Excel, with the same filters of the screen (ADMIN)",
+               description = "Takes the same term and hospitalId of GET /stock/storeroom. Without hospitalId, every "
+                       + "storeroom the user can see, each row saying which one it is. misplaced=true exports "
+                       + "instead the balance sitting in the storeroom of a hospital supplied by a center.")
+    public ResponseEntity<byte[]> storeroomSpreadsheet(@RequestParam(required = false) String term,
+                                                       @RequestParam(required = false) Long hospitalId,
+                                                       @RequestParam(defaultValue = "false") boolean misplaced) {
+        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.STOREROOM, misplaced),
+                misplaced ? "estoque-na-sala-fora-do-lugar.xlsx" : "estoque-na-sala.xlsx");
     }
 
     @GetMapping("/hospital/{hospitalId}/xlsx")
@@ -90,17 +127,22 @@ public class StockController {
         return stockService.history(hospitalId, start, end, pageable);
     }
 
+    /*
+     * Both answer 204 with no body. A String body is served as text/plain, and the screens read every answer
+     * as JSON, so a plain sentence broke the screen after the operation had already been recorded.
+     */
+
     @PostMapping("/entry")
     @Operation(summary = "Manual stock entry (ADMIN)")
-    public ResponseEntity<String> entry(@RequestBody @Valid StockEntryDTO dto) {
+    public ResponseEntity<Void> entry(@RequestBody @Valid StockEntryDTO dto) {
         stockService.manualEntry(dto);
-        return ResponseEntity.ok("Entry recorded");
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/adjustment")
     @Operation(summary = "Inventory adjustment: sets the counted balance of a lot (ADMIN)")
-    public ResponseEntity<String> adjustment(@RequestBody @Valid StockAdjustmentDTO dto) {
+    public ResponseEntity<Void> adjustment(@RequestBody @Valid StockAdjustmentDTO dto) {
         stockService.manualAdjustment(dto);
-        return ResponseEntity.ok("Balance adjusted");
+        return ResponseEntity.noContent().build();
     }
 }

@@ -119,4 +119,45 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             @Param("hospitalIds") java.util.Collection<Long> hospitalIds,
             @Param("term") String term,
             org.springframework.data.domain.Pageable pageable);
+
+    /**
+     * Stock by lot at one location only, for the given hospitals: the storeroom tab. Same search as
+     * searchLots, with the balance of the other location left out - so for STOREROOM the hospital
+     * quantity of the DTO comes back as zero, and only lots with balance at that location are listed.
+     */
+    @Query(value = """
+           SELECT new com.project.mss.dto.stock.LotStockDTO(
+                  l.id, m.id, m.ref, m.component, m.description, m.size, m.color, l.number, l.expiryDate,
+                  h.id, h.name,
+                  SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.HOSPITAL THEN e.quantity ELSE 0 END),
+                  SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.STOREROOM THEN e.quantity ELSE 0 END))
+           FROM Stock e JOIN e.lot l JOIN l.material m JOIN e.hospital h
+           WHERE e.quantity > 0 AND e.location = :location AND h.id IN :hospitalIds
+             AND (:term IS NULL
+                  OR UPPER(l.number) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR TRIM(LEADING '0' FROM UPPER(l.number)) LIKE CONCAT('%', TRIM(LEADING '0' FROM UPPER(CAST(:term AS String))), '%')
+                  OR UPPER(m.ref) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR UPPER(m.component) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR m.gtin LIKE CONCAT('%', CAST(:term AS String), '%'))
+           GROUP BY l.id, m.id, m.ref, m.component, m.description, m.size, m.color, l.number, l.expiryDate, h.id, h.name
+           ORDER BY m.ref, l.expiryDate, l.number, h.name
+           """,
+           countQuery = """
+           SELECT COUNT(DISTINCT CONCAT(CAST(l.id AS String), '-', CAST(h.id AS String)))
+           FROM Stock e JOIN e.lot l JOIN l.material m JOIN e.hospital h
+           WHERE e.quantity > 0 AND e.location = :location AND h.id IN :hospitalIds
+             AND (:term IS NULL
+                  OR UPPER(l.number) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR TRIM(LEADING '0' FROM UPPER(l.number)) LIKE CONCAT('%', TRIM(LEADING '0' FROM UPPER(CAST(:term AS String))), '%')
+                  OR UPPER(m.ref) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR UPPER(m.component) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR UPPER(m.description) LIKE UPPER(CONCAT('%', CAST(:term AS String), '%'))
+                  OR m.gtin LIKE CONCAT('%', CAST(:term AS String), '%'))
+           """)
+    org.springframework.data.domain.Page<com.project.mss.dto.stock.LotStockDTO> searchLotsAt(
+            @Param("hospitalIds") java.util.Collection<Long> hospitalIds,
+            @Param("term") String term,
+            @Param("location") Location location,
+            org.springframework.data.domain.Pageable pageable);
 }

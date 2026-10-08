@@ -35,6 +35,8 @@ const EXACT = {
   'One or more hospitals do not exist': 'Um ou mais hospitais não existem.',
   'Invalid session': 'Sessão inválida. Entre novamente.',
   'Adjustment reason is required': 'Informe o motivo do ajuste.',
+  'Hospital is required': 'Informe o hospital.',
+  'Location is required': 'Informe o local.',
   'REF is required': 'Informe a REF.',
   'Description is required': 'Informe a descrição.',
   'At least one product line is required': 'Escolha ao menos uma linha.',
@@ -86,6 +88,8 @@ const EXACT = {
 const PATTERNS = [
   [/^Unknown UserRole: (.+)$/, () => 'Perfil de usuário desconhecido.'],
   [/^REF (.+) already belongs to another material$/, (m) => `A REF ${m[1]} já pertence a outro item.`],
+  [/^Lot (.+) is already registered with REF (.+)$/,
+    (m) => `O lote ${m[1]} já está cadastrado na REF ${m[2]}. Um lote pertence a uma única REF: corrija pela Entrada.`],
   [/^Expiry date is required for lot (\S+) \(REF (.+)\)$/, (m) => `Informe a validade do lote ${m[1]} (REF ${m[2]}).`],
   [/^Pending issue (\S+) was already handled$/, () => 'Esta pendência já foi tratada.'],
   [/^Failed to generate PDF/, () => 'Não foi possível gerar o PDF.'],

@@ -119,8 +119,12 @@ public class LotScanService {
         }
         Result result = choose(candidates, expiryDate, hospital, lotNumber, ref);
 
-        // Unambiguous match: learn the GTIN so the next scans of this REF resolve directly
-        if (result.status() == Status.FOUND && gtin != null) {
+        // Unambiguous match: learn the GTIN so the next scans of this REF resolve directly.
+        // Only when the REF was confirmed on its own (typed by the user or read from the label's REF text):
+        // finding a single lot by the number alone is not proof that the label belongs to that REF, and a
+        // GTIN written on the wrong material would send every later scan of it to the wrong REF, silently
+        // and for good.
+        if (result.status() == Status.FOUND && gtin != null && ref != null) {
             materialService.assignGtinIfMissing(result.lot().getMaterial(), gtin);
         }
         return result;
