@@ -43,6 +43,13 @@ built files.
 Each screen that can be used in the operating room or in the storeroom has a **computer layout and a phone
 layout** (`*Desktop.jsx` / `*Mobile.jsx`), sharing the state through a `use*Draft.js` hook.
 
+In `pages/stock`, one component serves two of the three tabs: `LotView` takes a `location` prop
+(`HOSPITAL`, the default, or `STOREROOM`), so a fix in it reaches both tabs. Its filters — the chosen hospital
+and the search — live in `StockPage`, not inside the view, because the export button of the page header has to
+send the same filters the screen is using; that is what keeps the file and the screen from disagreeing.
+`AdjustDialog` takes the same `location`, which decides whether the counted quantity is the hospital's or the
+storeroom's.
+
 ## Reading codes
 
 `src/components/BarcodeScanner.jsx` is the **only** place that opens the camera: it serves the entry, the

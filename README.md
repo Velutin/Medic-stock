@@ -17,7 +17,7 @@ implant can be traced from the invoice to the patient.
 - [Screens](#screens)
 - [Data model](#data-model)
 - [Code reading (scanner and sheets)](#code-reading-scanner-and-sheets)
-- [Business rules](#business-rules)
+- [Business rules](#business-rules) — including [the storeroom](#stock-in-the-storeroom-get-stockstoreroom-admin) and [exports](#exporting-the-stock-get-stocklotsxlsx-get-stockstoreroomxlsx)
 - [Reports, billing and dashboard](#reports-billing-and-dashboard)
 - [Data migration (imports)](#data-migration-imports)
 - [Conventions](#conventions)
@@ -132,7 +132,7 @@ The `npm audit` warnings of the frontend are all in **development** dependencies
 | Screen | Path | Profiles |
 |---|---|---|
 | Painel | `/painel` | ADMIN, MASTER |
-| Estoque (by lot and by material) | `/estoque` | all |
+| Estoque (by lot, by material, in the storeroom) | `/estoque` | all; the storeroom tab only ADMIN, MASTER |
 | Entrada | `/entrada` | ADMIN, MASTER |
 | Transferência | `/transferencia` | ADMIN, MASTER |
 | Saída em cirurgia | `/saida` | ADMIN, MASTER, SURGICAL_TECH |
@@ -146,9 +146,18 @@ The `npm audit` warnings of the frontend are all in **development** dependencies
 Entrada, Transferência, Saída em cirurgia and Empréstimos each have a **computer layout and a phone layout**:
 on the phone the camera is the main input and every reading adds one unit.
 
-Searching for a material — in the catalog, hospital values, stock by lot, stock by material, minimum levels,
-loans and transfers — matches **REF, component (name) and description**; the catalog and the stock by lot also
-match the GTIN.
+Searching for a material — in the catalog, hospital values, stock by lot, stock by material, the storeroom,
+minimum levels, loans and transfers — matches **REF, component (name) and description**; the catalog, the
+stock by lot and the storeroom also match the GTIN.
+
+The Estoque screen has three tabs, two of them served by the same component (`LotView`) with a different
+location, so an improvement to one reaches the other:
+
+| Tab | Who sees it | What it shows |
+|---|---|---|
+| Por lote | all but surgical techs | balance inside each hospital, with the storeroom balance alongside |
+| Por material | everyone | summary without lots, grouped by section (the surgical tech's only view) |
+| Na sala | ADMIN, MASTER | balance in the storerooms, lot by lot, waiting to be transferred |
 
 ## Data model
 
@@ -271,6 +280,35 @@ Scanning rules:
     the lot was, what it became and the reason given. Nothing moved — what changed is the identity of the lot.
     Changing the quantity still records `INVENTORY_ADJUSTMENT`.
 
+### Stock in the storeroom (`GET /stock/storeroom`, ADMIN)
+
+- The same search and the same row shape as the stock by lot, restricted to the **storeroom** balances: only
+  lots with balance there, so the hospital quantity of each row comes back as zero and that column is left out
+  of the screen. The pencil edits the item and the **storeroom** balance of the line.
+- A **distribution center appears here**, because a center keeps material only in the storeroom — that is
+  where its stock lives. For the same reason the pencil shows for a center here and not in the stock by lot,
+  where it has nothing inside the hospital to edit.
+- A hospital supplied by a distribution center **has no storeroom of its own**: its storeroom is the center's,
+  so it is not offered in the filter and not listed. If some balance is sitting in such a storeroom anyway
+  (an initial-stock import, say), it is **not hidden**: the screen warns how many lots there are and shows
+  them apart on request (`misplaced=true`), because hidden material is material lost.
+
+### Exporting the stock (`GET /stock/lots/xlsx`, `GET /stock/storeroom/xlsx`)
+
+- Each export takes the **same `term` and `hospitalId` of its screen**, so the file and the tab cannot
+  disagree: it is the same query, not a second one. Without `hospitalId` it exports every hospital (or
+  storeroom) the user can see, and each row says which one it is.
+- **Expired lots are included**, with `Situação` (Vencido / Vence em até 30 dias / Válido) and
+  `Dias para vencer` as a number, negative when expired — sorting by it puts what has to go back to the
+  supplier at the top.
+- In the stock-by-lot file, columns **A to I keep the order** of the hospital spreadsheet it replaces (REF,
+  Descrição, Componente, Tamanho, Lote, Validade, No hospital, Na sala, Total) and the sheet keeps the name
+  `Estoque`, so a formula pointing at a column or at the sheet still works; the new columns come after.
+- The first row records what produced the file: which place, the date, the search used, and whether the list
+  was cut at the 20.000-row ceiling (the screen is paginated, the file is not).
+- `GET /stock/hospital/{hospitalId}/xlsx` is the older export, by hospital and without the search; no screen
+  uses it any more.
+
 ### Stock by material (`GET /stock/summary`)
 
 - Grouped by section, then by item name (component) and size; 10 sizes per page on screen.
@@ -318,6 +356,11 @@ Scanning rules:
 A distribution center keeps material only in the **storeroom** and supplies several hospitals. The entry goes
 to the center's storeroom and distributing to a hospital is a transfer. A hospital can belong to only one
 center (`PUT /hospitals/{id}/covered-hospitals`).
+
+A hospital supplied by a center therefore has **no storeroom of its own**: material for it enters the center,
+and a transfer puts it inside the hospital, never in a storeroom of its own. Anywhere a storeroom is offered
+as a place, these hospitals are left out — `HospitalRepository.findCoveredHospitalIds()` is what says which
+they are.
 
 ## Reports, billing and dashboard
 
@@ -394,3 +437,7 @@ Each import returns the rows with errors for correction and reload.
 | E-mails are not delivered | RabbitMQ must be running and the mail service must be up: it is the service that declares the `default.email` queue. |
 | A lot was typed wrong at the entry | Estoque › Por lote, the pencil on the line. See [Stock by lot](#stock-by-lot-get-stocklots). |
 | The entry refuses a lot that exists | The number is registered with another REF. The screen offers the REF change; if the lot already went out in a surgery, the change is blocked and the surgeries are listed. |
+| A hospital is missing from the Na sala filter | It is supplied by a distribution center, so its storeroom is the center's. Its stock inside the hospital is in Estoque › Por lote. |
+| Estoque › Na sala warns about lots "fora desta lista" | Some balance is sitting in the storeroom of a hospital supplied by a center. Open it with the warning's button and move it: into the hospital, or back to the center's storeroom. |
+| The exported spreadsheet totals differ from the old file | The export now includes expired lots, and follows the screen's filter and search. The `Situação` column says which rows are expired. |
+| The mss does not start after an update | A service may have gained a constructor dependency (`StockService` took `HospitalRepository`). Check the stack trace for the bean it could not build. |

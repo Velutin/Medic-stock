@@ -274,9 +274,9 @@ public class ReportService {
      * the supplier - and the expiry columns say which they are.
      */
     @Transactional(readOnly = true)
-    public byte[] lotSpreadsheet(String term, Long hospitalId, Location location) {
+    public byte[] lotSpreadsheet(String term, Long hospitalId, Location location, boolean misplaced) {
         boolean storeroom = location == Location.STOREROOM;
-        Page<LotStockDTO> page = stockService.lotsForExport(term, hospitalId, location);
+        Page<LotStockDTO> page = stockService.lotsForExport(term, hospitalId, location, misplaced);
         List<LotStockDTO> rows = page.getContent();
         String place = hospitalId == null ? (storeroom ? "Todas as salas" : "Todos os hospitais")
                 : accessControlService.requireHospitalAccess(hospitalId).getName();
@@ -299,7 +299,9 @@ public class ReportService {
             borders(headerStyle);
 
             // The title records what produced the file: where, the search used and, if it was cut, that it was
-            StringBuilder titleText = new StringBuilder(storeroom ? "Estoque na sala - " : "Estoque por lote - ")
+            StringBuilder titleText = new StringBuilder(storeroom
+                    ? (misplaced ? "Saldo em sala de hospital atendido por centro de distribuição - " : "Estoque na sala - ")
+                    : "Estoque por lote - ")
                     .append(place).append(" - ").append(LocalDate.now().format(DATE));
             if (term != null && !term.isBlank()) titleText.append(" - busca: ").append(term.trim());
             if (page.getTotalElements() > rows.size()) {

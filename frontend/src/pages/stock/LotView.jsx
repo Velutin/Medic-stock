@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Box, Button, IconButton, Paper, Skeleton, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
+  Alert, Box, Button, IconButton, Paper, Skeleton, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
   TablePagination, TableRow, TextField, Tooltip, Typography, useMediaQuery,
 } from '@mui/material';
 import EditOutlined from '@mui/icons-material/EditOutlined';
@@ -43,7 +43,7 @@ function useDebounced(value, delay = 350) {
  *    the storeroom of a distribution center. The pencil edits the item and the storeroom balance.
  */
 export default function LotView({ hospitals, hospitalId, onHospitalChange, canAdjust, reloadKey,
-                                  location = 'HOSPITAL', term, onTermChange }) {
+                                  location = 'HOSPITAL', term, onTermChange, misplaced = false, onMisplacedChange }) {
   const notify = useNotify();
   const isMobile = useMediaQuery('(max-width:899.95px)');
   const storeroom = location === 'STOREROOM';
@@ -53,19 +53,34 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
   const [size, setSize] = useState(25);
   const [data, setData] = useState(null);
   const [adjusting, setAdjusting] = useState(null);
+  const [misplacedCount, setMisplacedCount] = useState(0);
 
   const load = useCallback(async () => {
     try {
       setData(await api(storeroom ? '/stock/storeroom' : '/stock/lots',
-        { query: { term: debouncedTerm, hospitalId, page, size } }));
+        { query: { term: debouncedTerm, hospitalId, page, size, misplaced: misplaced || undefined } }));
     } catch (err) {
       notify.error(err);
       setData({ content: [], totalElements: 0 });
     }
-  }, [storeroom, debouncedTerm, hospitalId, page, size, notify]);
+  }, [storeroom, debouncedTerm, hospitalId, page, size, misplaced, notify]);
 
   useEffect(() => { load(); }, [load, reloadKey]);
-  useEffect(() => { setPage(0); }, [debouncedTerm, hospitalId]);
+  useEffect(() => { setPage(0); }, [debouncedTerm, hospitalId, misplaced]);
+
+  /*
+   * A hospital supplied by a distribution center has no storeroom of its own. If some balance is sitting in
+   * one anyway (an initial-stock import, say), it is reported here instead of being hidden - hidden material
+   * is material lost. Normally this count is zero and nothing shows up.
+   */
+  useEffect(() => {
+    if (!storeroom) return;
+    let active = true;
+    api('/stock/storeroom', { query: { misplaced: true, size: 1 } })
+      .then((r) => { if (active) setMisplacedCount(r.totalElements); })
+      .catch(() => { /* the warning is a courtesy: failing to count it must not break the screen */ });
+    return () => { active = false; };
+  }, [storeroom, reloadKey]);
 
   const allHospitals = !hospitalId;
   const rows = data?.content || [];
@@ -101,6 +116,21 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
         <TextField type="search" size="small" label="Buscar" placeholder="Lote, REF, nome, descrição ou GTIN" value={term}
           onChange={(e) => onTermChange(e.target.value)} sx={{ flex: 1, minWidth: { xs: '100%', sm: 280 } }} />
       </Box>
+
+      {storeroom && misplaced && (
+        <Alert severity="warning" sx={{ mb: 2 }}
+          action={<Button size="small" onClick={() => onMisplacedChange(false)}>Voltar</Button>}>
+          Saldo na sala de hospital atendido por centro de distribuição. A sala desses hospitais é a do centro,
+          então este saldo não deveria estar aqui — transfira para dentro do hospital ou devolva à sala do centro.
+        </Alert>
+      )}
+      {storeroom && !misplaced && misplacedCount > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}
+          action={<Button size="small" onClick={() => onMisplacedChange(true)}>Ver</Button>}>
+          {misplacedCount === 1 ? 'Há 1 lote com saldo' : `Há ${misplacedCount} lotes com saldo`} na sala de
+          hospital atendido por centro de distribuição, fora desta lista.
+        </Alert>
+      )}
 
       {data === null ? (
         <Stack spacing={1}>{[1, 2, 3, 4].map((i) => <Skeleton key={i} variant="rounded" height={44} />)}</Stack>

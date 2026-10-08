@@ -35,6 +35,7 @@ import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.MovementType;
 import com.project.mss.repository.StockRepository;
 import com.project.mss.repository.StockMovementRepository;
+import com.project.mss.repository.HospitalRepository;
 import com.project.mss.repository.MinimumStockRepository;
 
 /**
@@ -56,15 +57,17 @@ public class StockService {
     private final MaterialService materialService;
     private final AccessControlService accessControlService;
     private final MinimumStockRepository minimumStockRepository;
+    private final HospitalRepository hospitalRepository;
 
     public StockService(StockRepository stockRepository, StockMovementRepository stockMovementRepository,
                           MaterialService materialService, AccessControlService accessControlService,
-                          MinimumStockRepository minimumStockRepository) {
+                          MinimumStockRepository minimumStockRepository, HospitalRepository hospitalRepository) {
         this.stockRepository = stockRepository;
         this.stockMovementRepository = stockMovementRepository;
         this.materialService = materialService;
         this.accessControlService = accessControlService;
         this.minimumStockRepository = minimumStockRepository;
+        this.hospitalRepository = hospitalRepository;
     }
 
     // ============================================================ base operations
@@ -375,13 +378,21 @@ public class StockService {
      * Stock inside the storerooms, lot by lot (administrators): what is waiting to be transferred, including
      * the storeroom of a distribution center. Only lots with balance in the storeroom are listed, so the
      * hospital quantity of each row comes back as zero.
+     *
+     * A hospital supplied by a distribution center has no storeroom of its own - its storeroom is the
+     * center's - so it is left out of the list. misplaced=true lists exactly the opposite: balance sitting in
+     * the storeroom of such a hospital, which should not exist and the screen reports apart instead of
+     * hiding, because hidden material is material lost.
      */
     @Transactional(readOnly = true)
-    public Page<LotStockDTO> searchStoreroomLots(String term, Long hospitalId, Pageable pageable) {
+    public Page<LotStockDTO> searchStoreroomLots(String term, Long hospitalId, boolean misplaced, Pageable pageable) {
         accessControlService.requireManager();
         java.util.Set<Long> hospitals = hospitalId != null
                 ? java.util.Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
                 : accessControlService.allowedHospitals();
+        java.util.Set<Long> covered = hospitalRepository.findCoveredHospitalIds();
+        hospitals = hospitals.stream().filter(id -> covered.contains(id) == misplaced)
+                .collect(java.util.stream.Collectors.toSet());
         if (hospitals.isEmpty()) return Page.empty(pageable);
         String t = term == null || term.isBlank() ? null : term.trim();
         return stockRepository.searchLotsAt(hospitals, t, Location.STOREROOM, pageable);
@@ -389,9 +400,9 @@ public class StockService {
 
     /** Rows of a stock-by-lot export: the same search of the screen, so file and screen never disagree. */
     @Transactional(readOnly = true)
-    public Page<LotStockDTO> lotsForExport(String term, Long hospitalId, Location location) {
+    public Page<LotStockDTO> lotsForExport(String term, Long hospitalId, Location location, boolean misplaced) {
         Pageable page = PageRequest.of(0, MAX_EXPORT_ROWS);
-        return location == Location.STOREROOM ? searchStoreroomLots(term, hospitalId, page)
+        return location == Location.STOREROOM ? searchStoreroomLots(term, hospitalId, misplaced, page)
                 : searchLots(term, hospitalId, page);
     }
 

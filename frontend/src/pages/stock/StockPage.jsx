@@ -27,11 +27,15 @@ export default function StockPage() {
   const { hospitals: all } = useHospitals();
   // Distribution centers only appear in the lot view (their storeroom stock).
   const hospitals = all.filter((h) => h.type === 'HOSPITAL');
+  // Only these have a storeroom of their own: a hospital supplied by a distribution center uses the
+  // center's storeroom, so offering it in the storeroom filter would promise a place that does not exist.
+  const storerooms = all.filter((h) => !h.distributionCenterId);
   const [tab, setTab] = useState('lots');
   const [lotHospital, setLotHospital] = useState('');
   const [lotTerm, setLotTerm] = useState('');
   const [storeroomHospital, setStoreroomHospital] = useState('');
   const [storeroomTerm, setStoreroomTerm] = useState('');
+  const [storeroomMisplaced, setStoreroomMisplaced] = useState(false);
   const [summaryHospital, setSummaryHospital] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -48,12 +52,14 @@ export default function StockPage() {
    */
   const exportSpreadsheet = async () => {
     const storeroom = tab === 'storeroom';
+    const misplaced = storeroom && storeroomMisplaced;
     const today = new Date().toLocaleDateString('sv-SE'); // AAAA-MM-DD, para o arquivo ordenar por data
-    const name = `${storeroom ? 'estoque-na-sala' : 'estoque-por-lote'}-${today}.xlsx`;
+    const base = misplaced ? 'estoque-na-sala-fora-do-lugar' : storeroom ? 'estoque-na-sala' : 'estoque-por-lote';
     try {
-      await downloadFile(storeroom ? '/stock/storeroom/xlsx' : '/stock/lots/xlsx', name, {
+      await downloadFile(storeroom ? '/stock/storeroom/xlsx' : '/stock/lots/xlsx', `${base}-${today}.xlsx`, {
         term: storeroom ? storeroomTerm : lotTerm,
         hospitalId: storeroom ? storeroomHospital : lotHospital,
+        misplaced: misplaced || undefined,
       });
     } catch (err) {
       notify.error(err);
@@ -99,8 +105,9 @@ export default function StockPage() {
         <LotView hospitals={all} hospitalId={lotHospital} onHospitalChange={setLotHospital}
           term={lotTerm} onTermChange={setLotTerm} canAdjust={manager} reloadKey={reloadKey} />
       ) : tab === 'storeroom' ? (
-        <LotView location="STOREROOM" hospitals={all} hospitalId={storeroomHospital}
+        <LotView location="STOREROOM" hospitals={storerooms} hospitalId={storeroomHospital}
           onHospitalChange={setStoreroomHospital} term={storeroomTerm} onTermChange={setStoreroomTerm}
+          misplaced={storeroomMisplaced} onMisplacedChange={setStoreroomMisplaced}
           canAdjust={manager} reloadKey={reloadKey} />
       ) : (
         <SummaryView hospitals={hospitals} hospitalId={summaryHospital} onHospitalChange={setSummaryHospital} reloadKey={reloadKey} />

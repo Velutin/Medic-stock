@@ -72,8 +72,9 @@ public class StockController {
                        + "storeroom are listed, so hospitalQuantity comes back as zero. Paginated.")
     public Page<LotStockDTO> storeroom(@RequestParam(required = false) String term,
                                        @RequestParam(required = false) Long hospitalId,
+                                       @RequestParam(defaultValue = "false") boolean misplaced,
                                        @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
-        return stockService.searchStoreroomLots(term, hospitalId, pageable);
+        return stockService.searchStoreroomLots(term, hospitalId, misplaced, pageable);
     }
 
     @GetMapping("/material")
@@ -95,18 +96,20 @@ public class StockController {
                        + "can see. Rows carry the size identification color.")
     public ResponseEntity<byte[]> lotsSpreadsheet(@RequestParam(required = false) String term,
                                                   @RequestParam(required = false) Long hospitalId) {
-        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.HOSPITAL),
+        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.HOSPITAL, false),
                 "estoque-por-lote.xlsx");
     }
 
     @GetMapping("/storeroom/xlsx")
     @Operation(summary = "Download the storeroom stock as Excel, with the same filters of the screen (ADMIN)",
                description = "Takes the same term and hospitalId of GET /stock/storeroom. Without hospitalId, every "
-                       + "storeroom the user can see, each row saying which one it is.")
+                       + "storeroom the user can see, each row saying which one it is. misplaced=true exports "
+                       + "instead the balance sitting in the storeroom of a hospital supplied by a center.")
     public ResponseEntity<byte[]> storeroomSpreadsheet(@RequestParam(required = false) String term,
-                                                       @RequestParam(required = false) Long hospitalId) {
-        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.STOREROOM),
-                "estoque-na-sala.xlsx");
+                                                       @RequestParam(required = false) Long hospitalId,
+                                                       @RequestParam(defaultValue = "false") boolean misplaced) {
+        return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.STOREROOM, misplaced),
+                misplaced ? "estoque-na-sala-fora-do-lugar.xlsx" : "estoque-na-sala.xlsx");
     }
 
     @GetMapping("/hospital/{hospitalId}/xlsx")
