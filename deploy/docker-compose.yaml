@@ -1,0 +1,215 @@
+# Production stack — Medic-stock (MSS)
+#
+# Run from the repository root:
+#   docker compose -f deploy/docker-compose.yaml --env-file deploy/.env up -d --build
+#
+# Every published port is bound to 127.0.0.1: nothing here is reachable from the internet.
+# The only doors open on the server are 80 and 443, held by nginx on the host.
+#
+# Memory: the limits add up to about 3 GB, leaving roughly 1 GB for the operating
+# system, Docker itself and nginx on a 4 GB machine.
+
+name: mss
+
+services:
+
+  # ---------------------------------------------------------------- databases
+  postgres-mss:
+    image: postgres:16
+    container_name: mss_db
+    environment:
+      POSTGRES_DB: ${MSS_DB_NAME:-mssdb}
+      POSTGRES_USER: ${MSS_DB_USER:-mss}
+      POSTGRES_PASSWORD: ${MSS_DB_PASSWORD:?defina MSS_DB_PASSWORD no .env}
+      TZ: America/Bahia
+      PGTZ: America/Bahia
+    # Tuned for a small machine. shared_buffers defaults to 128MB, which on top of
+    # the per-connection memory would not fit the limit below.
+    command: >
+      postgres
+      -c shared_buffers=96MB
+      -c max_connections=40
+      -c work_mem=4MB
+      -c maintenance_work_mem=48MB
+    ports:
+      - "127.0.0.1:5440:5432"
+    volumes:
+      - postgres-mss-data:/var/lib/postgresql/data
+    networks:
+      - mss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 384m
+    restart: unless-stopped
+
+  postgres-mail:
+    image: postgres:16
+    container_name: mss_email_db
+    environment:
+      POSTGRES_DB: ${MAIL_DB_NAME:-mssemaildb}
+      POSTGRES_USER: ${MAIL_DB_USER:-email}
+      POSTGRES_PASSWORD: ${MAIL_DB_PASSWORD:?defina MAIL_DB_PASSWORD no .env}
+      TZ: America/Bahia
+      PGTZ: America/Bahia
+    command: >
+      postgres
+      -c shared_buffers=32MB
+      -c max_connections=20
+      -c work_mem=2MB
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - postgres-mail-data:/var/lib/postgresql/data
+    networks:
+      - mss-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 160m
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- queue
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-mss}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?defina RABBITMQ_PASSWORD no .env}
+      TZ: America/Bahia
+    ports:
+      - "127.0.0.1:5672:5672"    # AMQP
+      - "127.0.0.1:15672:15672"  # management UI, reachable only through an SSH tunnel
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - mss-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    mem_limit: 320m
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- services
+  eureka-server:
+    build:
+      context: ../backend/eureka-server
+    container_name: mss_eureka
+    environment:
+      EUREKA_URL: http://eureka-server:8082/eureka/
+      EUREKA_SELF_PRESERVATION: "true"
+      EUREKA_EVICTION_MS: "60000"
+      TZ: America/Bahia
+    ports:
+      - "127.0.0.1:8082:8082"
+    networks:
+      - mss-network
+    mem_limit: 320m
+    restart: unless-stopped
+
+  mss:
+    build:
+      context: ../backend/mss
+    container_name: mss_api
+    environment:
+      DB_URL: jdbc:postgresql://postgres-mss:5432/${MSS_DB_NAME:-mssdb}
+      DB_USER: ${MSS_DB_USER:-mss}
+      DB_PASSWORD: ${MSS_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      FRONTEND_URL: ${FRONTEND_URL:?defina FRONTEND_URL no .env}
+      COOKIE_SECURE: "true"
+      COMPANY_NAME: ${COMPANY_NAME:-Baumer}
+      STORAGE_DIR: /app/storage
+      LOGO_PATH: /app/branding/logo.png
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-mss}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      EUREKA_URL: http://eureka-server:8082/eureka/
+      SQL_LOG_LEVEL: INFO
+      TZ: America/Bahia
+    ports:
+      # nginx on the host reaches the API here. This is the only service the site needs.
+      - "127.0.0.1:8085:8085"
+    volumes:
+      # Surgery consumption sheets. A named volume survives rebuilds and redeploys —
+      # it is what the backup script copies.
+      - mss-storage:/app/storage
+      # Report logo mounted from the host, so dropping a new branding/logo.png and
+      # restarting the container is enough — no rebuild, as the README promises.
+      - ../backend/mss/branding:/app/branding:ro
+    networks:
+      - mss-network
+    depends_on:
+      postgres-mss:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    mem_limit: 1200m
+    restart: unless-stopped
+
+  mail:
+    build:
+      context: ../backend/mail
+    container_name: mss_mail
+    environment:
+      DB_URL: jdbc:postgresql://postgres-mail:5432/${MAIL_DB_NAME:-mssemaildb}
+      DB_USER: ${MAIL_DB_USER:-email}
+      DB_PASSWORD: ${MAIL_DB_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: ${RABBITMQ_USER:-mss}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      MAIL_HOST: ${MAIL_HOST:?defina MAIL_HOST no .env}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:?defina MAIL_USERNAME no .env}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:?defina MAIL_PASSWORD no .env}
+      EUREKA_URL: http://eureka-server:8082/eureka/
+      TZ: America/Bahia
+    networks:
+      - mss-network
+    depends_on:
+      postgres-mail:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      eureka-server:
+        condition: service_started
+    mem_limit: 320m
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ../backend/gateway
+    container_name: mss_gateway
+    environment:
+      EUREKA_URL: http://eureka-server:8082/eureka/
+      EUREKA_INSTANCE_HOSTNAME: gateway
+      CORS_ALLOWED_ORIGINS: ${FRONTEND_URL}
+      GATEWAY_LOG_LEVEL: INFO
+      TZ: America/Bahia
+    ports:
+      - "127.0.0.1:8090:8090"
+    networks:
+      - mss-network
+    depends_on:
+      eureka-server:
+        condition: service_started
+    mem_limit: 320m
+    restart: unless-stopped
+
+volumes:
+  postgres-mss-data:
+  postgres-mail-data:
+  rabbitmq-data:
+  mss-storage:
+
+networks:
+  mss-network:
+    driver: bridge
