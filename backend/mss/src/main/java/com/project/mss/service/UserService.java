@@ -9,6 +9,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,13 +52,15 @@ public class UserService {
     private final EmailService emailService;
     private final PasswordResetTokenService passwordResetTokenService;
     private final AccessControlService accessControlService;
+    private final LoginThrottleService loginThrottleService;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public UserService(AuthenticationManager authenticationManager, UserRepository userRepository,
                        RoleRepository roleRepository, HospitalRepository hospitalRepository,
                        TokenService tokenService, EmailService emailService,
                        PasswordResetTokenService passwordResetTokenService,
-                       AccessControlService accessControlService) {
+                       AccessControlService accessControlService,
+                       LoginThrottleService loginThrottleService) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -66,15 +69,31 @@ public class UserService {
         this.emailService = emailService;
         this.passwordResetTokenService = passwordResetTokenService;
         this.accessControlService = accessControlService;
+        this.loginThrottleService = loginThrottleService;
     }
 
     // ============================================================ session
 
-    /** Authenticates by e-mail and password and returns the session token. */
-    public String login(LoginDTO login) {
-        var credentials = new UsernamePasswordAuthenticationToken(normalizeEmail(login.email()), login.password());
-        var auth = authenticationManager.authenticate(credentials);
-        return tokenService.generateToken((User) auth.getPrincipal(), login.rememberMe());
+    /**
+     * Signs in. {@code address} is the client address, used by the brake on repeated attempts;
+     * null disables that part (a call outside the HTTP path).
+     *
+     * <p>The brake is checked <b>before</b> the password is verified, on purpose: verifying costs a
+     * quarter of a second of processor (BCrypt), and that cost is exactly what an attacker would
+     * spend to take the server down without guessing anything.
+     */
+    public String login(LoginDTO login, String address) {
+        String email = normalizeEmail(login.email());
+        loginThrottleService.checkAllowed(email, address);
+        try {
+            var credentials = new UsernamePasswordAuthenticationToken(email, login.password());
+            var auth = authenticationManager.authenticate(credentials);
+            loginThrottleService.recordSuccess(email);
+            return tokenService.generateToken((User) auth.getPrincipal(), login.rememberMe());
+        } catch (AuthenticationException e) {
+            loginThrottleService.recordFailure(email, address);
+            throw e;
+        }
     }
 
     /** User of a freshly issued token (used in the login response, before the cookie is sent back). */

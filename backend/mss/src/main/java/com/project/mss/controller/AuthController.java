@@ -13,6 +13,7 @@ import com.project.mss.service.UserService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 @RestController
@@ -32,8 +33,10 @@ public class AuthController {
     @Operation(summary = "Log in with e-mail and password",
                description = "rememberMe=true keeps the session on this device for 7 days; otherwise it ends "
                        + "after 30 minutes without use or when the browser is closed.")
-    public ResponseEntity<UserDTO> login(@RequestBody @Valid LoginDTO login) {
-        String token = userService.login(login);
+    public ResponseEntity<UserDTO> login(@RequestBody @Valid LoginDTO login, HttpServletRequest request) {
+        // The real client address: nginx sends X-Forwarded-For and server.forward-headers-strategy
+        // makes Spring honour it, so this is not the address of the proxy.
+        String token = userService.login(login, request.getRemoteAddr());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, sessionCookies.create(token, login.rememberMe()).toString())
                 .body(userService.findByToken(token));
