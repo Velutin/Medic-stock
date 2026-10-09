@@ -28,8 +28,10 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authorize -> authorize
-                    // Public resources / docs
-                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/error").permitAll()
+                    // Error page. The Swagger paths used to be public here; the documentation is now
+                    // turned off (springdoc.*.enabled in application.properties) and, were it turned
+                    // back on, it would fall into the catch-all below: administrators only.
+                    .requestMatchers("/error").permitAll()
 
                     // Public: login, logout, first access and password reset
                     .requestMatchers(HttpMethod.POST, "/auth/session", "/auth/password-reset-requests", "/auth/password-resets").permitAll()
