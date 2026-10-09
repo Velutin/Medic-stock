@@ -85,7 +85,13 @@ const EXACT = {
   'Provide either hospitalId or sourceHospitalId': 'Informe o hospital.',
 };
 
+const segundos = (n) => (n === '1' ? '1 segundo' : `${n} segundos`);
+
 const PATTERNS = [
+  [/^Too many sign-in attempts from this address\. Try again in (\d+) seconds\.$/,
+    (m) => `Muitas tentativas de entrada a partir deste local. Aguarde ${segundos(m[1])} e tente novamente.`],
+  [/^Too many sign-in attempts\. Try again in (\d+) seconds\.$/,
+    (m) => `Muitas tentativas seguidas com a senha errada. Aguarde ${segundos(m[1])} e tente novamente. Se não lembra a senha, use "Esqueci minha senha".`],
   [/^Unknown UserRole: (.+)$/, () => 'Perfil de usuário desconhecido.'],
   [/^REF (.+) already belongs to another material$/, (m) => `A REF ${m[1]} já pertence a outro item.`],
   [/^Lot (.+) is already registered with REF (.+)$/,

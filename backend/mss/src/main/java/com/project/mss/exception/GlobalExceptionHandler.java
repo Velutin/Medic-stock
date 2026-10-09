@@ -53,6 +53,12 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.FORBIDDEN, e.getMessage());
     }
 
+    /** Brake on repeated sign-in attempts. The message already carries the wait in seconds. */
+    @ExceptionHandler(TooManyAttemptsException.class)
+    public ResponseEntity<ErrorResponse> handleTooManyAttempts(TooManyAttemptsException e) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<ErrorResponse> handleDisabled(DisabledException e) {
         return error(HttpStatus.UNAUTHORIZED, "User is inactive or has not completed the first access");
