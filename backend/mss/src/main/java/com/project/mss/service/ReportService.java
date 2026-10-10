@@ -143,11 +143,14 @@ public class ReportService {
     @Transactional(readOnly = true)
     public byte[] orderPdf(Long orderId) {
         SupplierOrder p = supplierOrderService.load(orderId);
+        // Ordered by REF only. The "Urgente" column used to come first in the sort, but the
+        // flag never varies: the replenishment screen always sends urgent=true, and unchecking
+        // an item there removes it from the order instead of marking it as not urgent. So the
+        // column printed "Sim" on every line and the sort by it never changed anything.
         List<String[]> rows = p.getItems().stream()
-                .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> !i.getUrgent())
-                        .thenComparing(i -> i.getMaterial().getRef()))
+                .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> i.getMaterial().getRef()))
                 .map(i -> new String[]{i.getMaterial().getRef(), i.getMaterial().getDescription(),
-                        String.valueOf(i.getQuantity()), Boolean.TRUE.equals(i.getUrgent()) ? "Sim" : "Não"})
+                        String.valueOf(i.getQuantity())})
                 .toList();
         return pdfService.generate(new PdfService.Report(
                 "SOLICITAÇÃO DE MATERIAL",
@@ -155,8 +158,8 @@ public class ReportService {
                         new String[]{"Pedido nº:", String.valueOf(p.getId())},
                         new String[]{"Data:", p.getCreatedAt().format(DATE_TIME)},
                         new String[]{"Observação:", p.getNotes()}),
-                new String[]{"REF", "Material", "Qtd", "Urgente"},
-                new float[]{1.5f, 5f, 0.7f, 0.9f}, rows,
+                new String[]{"REF", "Material", "Qtd"},
+                new float[]{1.5f, 5f, 0.7f}, rows,
                 "Total de itens: " + p.getItems().stream().mapToInt(i -> i.getQuantity()).sum(),
                 new String[0]));
     }
