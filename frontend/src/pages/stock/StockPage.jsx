@@ -18,6 +18,11 @@ import { useNotify } from '../../notifications/NotificationProvider';
  * Stock screen. Surgical techs: summary without lots. Administrators and read-only users: tabs "by lot"
  * (with every hospital) and "by material" (summary). Administrators also get "in the storeroom", the same
  * lot view restricted to the storeroom balances.
+ *
+ * The tab "by lot" is the same tab for both profiles and keeps the same name, but not the same content: an
+ * administrator sees the hospital and the storeroom, a read-only user sees only what is inside the
+ * hospital. The storeroom is the company's own stock and does not belong to that profile, so the API
+ * decides it - withStoreroom here only keeps the screen from drawing a column that would always be zero.
  */
 export default function StockPage() {
   const { user } = useAuth();
@@ -103,7 +108,8 @@ export default function StockPage() {
 
       {tab === 'lots' ? (
         <LotView hospitals={all} hospitalId={lotHospital} onHospitalChange={setLotHospital}
-          term={lotTerm} onTermChange={setLotTerm} canAdjust={manager} reloadKey={reloadKey} />
+          term={lotTerm} onTermChange={setLotTerm} canAdjust={manager} withStoreroom={manager}
+          reloadKey={reloadKey} />
       ) : tab === 'storeroom' ? (
         <LotView location="STOREROOM" hospitals={storerooms} hospitalId={storeroomHospital}
           onHospitalChange={setStoreroomHospital} term={storeroomTerm} onTermChange={setStoreroomTerm}

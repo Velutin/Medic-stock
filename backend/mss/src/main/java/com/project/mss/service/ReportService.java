@@ -143,14 +143,11 @@ public class ReportService {
     @Transactional(readOnly = true)
     public byte[] orderPdf(Long orderId) {
         SupplierOrder p = supplierOrderService.load(orderId);
-        // Ordered by REF only. The "Urgente" column used to come first in the sort, but the
-        // flag never varies: the replenishment screen always sends urgent=true, and unchecking
-        // an item there removes it from the order instead of marking it as not urgent. So the
-        // column printed "Sim" on every line and the sort by it never changed anything.
         List<String[]> rows = p.getItems().stream()
-                .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> i.getMaterial().getRef()))
+                .sorted(Comparator.comparing((com.project.mss.model.entity.SupplierOrderItem i) -> !i.getUrgent())
+                        .thenComparing(i -> i.getMaterial().getRef()))
                 .map(i -> new String[]{i.getMaterial().getRef(), i.getMaterial().getDescription(),
-                        String.valueOf(i.getQuantity())})
+                        String.valueOf(i.getQuantity()), Boolean.TRUE.equals(i.getUrgent()) ? "Sim" : "Não"})
                 .toList();
         return pdfService.generate(new PdfService.Report(
                 "SOLICITAÇÃO DE MATERIAL",
@@ -158,8 +155,8 @@ public class ReportService {
                         new String[]{"Pedido nº:", String.valueOf(p.getId())},
                         new String[]{"Data:", p.getCreatedAt().format(DATE_TIME)},
                         new String[]{"Observação:", p.getNotes()}),
-                new String[]{"REF", "Material", "Qtd"},
-                new float[]{1.5f, 5f, 0.7f}, rows,
+                new String[]{"REF", "Material", "Qtd", "Urgente"},
+                new float[]{1.5f, 5f, 0.7f, 0.9f}, rows,
                 "Total de itens: " + p.getItems().stream().mapToInt(i -> i.getQuantity()).sum(),
                 new String[0]));
     }
@@ -284,11 +281,25 @@ public class ReportService {
         String place = hospitalId == null ? (storeroom ? "Todas as salas" : "Todos os hospitais")
                 : accessControlService.requireHospitalAccess(hospitalId).getName();
 
-        String[] header = storeroom
-                ? new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "Na sala",
-                               "Situação", "Dias para vencer", "Sala"}
-                : new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
-                               "Na sala", "Total", "Situação", "Dias para vencer", "Hospital"};
+        /*
+         * The storeroom columns only exist for an administrator. For a read-only user the search already
+         * comes back with the storeroom balance zeroed, and printing a "Na sala" column of zeros would
+         * state that there is nothing in the storeroom - which is not what the zero means. Leaving the
+         * columns out says the truth: this file is about what is inside the hospital.
+         */
+        boolean withStoreroom = accessControlService.isManager();
+
+        String[] header;
+        if (storeroom) {
+            header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "Na sala",
+                                  "Situação", "Dias para vencer", "Sala"};
+        } else if (withStoreroom) {
+            header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
+                                  "Na sala", "Total", "Situação", "Dias para vencer", "Hospital"};
+        } else {
+            header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
+                                  "Situação", "Dias para vencer", "Hospital"};
+        }
 
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             XSSFSheet sh = wb.createSheet(storeroom ? "Estoque na sala" : "Estoque");
@@ -330,12 +341,18 @@ public class ReportService {
             for (LotStockDTO l : rows) {
                 long daysLeft = ChronoUnit.DAYS.between(today, l.expiryDate());
                 String status = daysLeft < 0 ? "Vencido" : daysLeft <= 30 ? "Vence em até 30 dias" : "Válido";
-                Object[] v = storeroom
-                        ? new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
-                                       l.expiryDate().format(DATE), l.storeroomQuantity(), status, daysLeft, l.hospital()}
-                        : new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
-                                       l.expiryDate().format(DATE), l.hospitalQuantity(), l.storeroomQuantity(),
-                                       l.hospitalQuantity() + l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                Object[] v;
+                if (storeroom) {
+                    v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
+                                     l.expiryDate().format(DATE), l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                } else if (withStoreroom) {
+                    v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
+                                     l.expiryDate().format(DATE), l.hospitalQuantity(), l.storeroomQuantity(),
+                                     l.hospitalQuantity() + l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                } else {
+                    v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
+                                     l.expiryDate().format(DATE), l.hospitalQuantity(), status, daysLeft, l.hospital()};
+                }
                 XSSFCellStyle style = l.color() == null ? defaultStyle
                         : stylesByColor.computeIfAbsent(l.color(), color -> colorStyle(wb, color));
                 Row row = sh.createRow(n++);

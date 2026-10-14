@@ -91,8 +91,15 @@ confere_dump() {
     local arquivo="$1"
     # gunzip valida o CRC do gzip; o marcador prova que é um dump de verdade e não
     # uma saída de erro que foi comprimida e cifrada sem ninguém perceber.
+    #
+    # O grep é -c, e não -q nem -m1, de propósito: estes dois saem no primeiro acerto
+    # e fecham o cano. O gunzip, ainda escrevendo, morre com SIGPIPE, e com
+    # 'set -o pipefail' o pipeline inteiro vira erro — reprovando um backup perfeito.
+    # Só aparece com dump grande o bastante para o gunzip não ter terminado antes;
+    # com arquivo pequeno passa, o que torna a falha fácil de não notar em teste.
+    # O -c conta todas as ocorrências, então consome o fluxo até o fim.
     "${GPG[@]}" --decrypt "${arquivo}" 2>/dev/null | gunzip 2>/dev/null \
-        | grep -qm1 'PostgreSQL database dump' \
+        | grep -c 'PostgreSQL database dump' >/dev/null \
         || fail "$(basename "${arquivo}") não passou na verificação — NÃO confie neste backup."
     log "  ok: $(basename "${arquivo}") ($(tamanho_de "${arquivo}"))"
 }
@@ -130,7 +137,7 @@ confere_tar "${BACKUP_DIR}/storage_${STAMP}.tar.gz.gpg"
 # --- configuração -------------------------------------------------------------
 log "configuração..."
 cifra "${BACKUP_DIR}/env_${STAMP}.gpg" < "${PROJECT_DIR}/deploy/.env"
-"${GPG[@]}" --decrypt "${BACKUP_DIR}/env_${STAMP}.gpg" 2>/dev/null | grep -q '^JWT_SECRET=' \
+"${GPG[@]}" --decrypt "${BACKUP_DIR}/env_${STAMP}.gpg" 2>/dev/null | grep -c '^JWT_SECRET=' >/dev/null \
     || fail "env_${STAMP}.gpg não passou na verificação."
 log "  ok: env_${STAMP}.gpg ($(tamanho_de "${BACKUP_DIR}/env_${STAMP}.gpg"))"
 

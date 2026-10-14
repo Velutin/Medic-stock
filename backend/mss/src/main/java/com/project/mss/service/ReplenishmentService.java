@@ -92,7 +92,7 @@ public class ReplenishmentService {
                 }
             }
 
-            result.add(new ReplenishmentSuggestionDTO(m.getId(), m.getRef(), m.getDescription(),
+            result.add(new ReplenishmentSuggestionDTO(m.getId(), m.getRef(), m.getDescription(), m.getColor(),
                     min.getHospitalIdeal(), min.getIdealTotal(), hospitalBalance, storeroomBalance,
                     replenishFromStoreroom, orderFromSupplier, storeroomHospitalId, lots));
         }
