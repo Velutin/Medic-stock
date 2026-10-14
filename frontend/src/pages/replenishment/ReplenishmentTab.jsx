@@ -8,12 +8,32 @@ import LocalShippingOutlined from '@mui/icons-material/LocalShippingOutlined';
 import PictureAsPdfOutlined from '@mui/icons-material/PictureAsPdfOutlined';
 import { api } from '../../api/client';
 import { downloadFile } from '../../api/download';
+import ColorSwatch from '../../components/ColorSwatch';
 import { useNotify } from '../../notifications/NotificationProvider';
 import { tokens } from '../../theme';
 
 const PAGE = 10;
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const pageLabel = ({ from, to, count }) => `${from}–${to} de ${count}`;
+
+/**
+ * REF with the size identification color beside it, which is what the separation on the bench goes by.
+ *
+ * The swatch keeps its width even when the material has no color, so every REF in the column starts at the
+ * same place. Elsewhere (the minimums tab, the summary) the swatch sits next to the size and is simply
+ * omitted, because there a short value shifting a few pixels costs nothing; here the REFs are read as a
+ * column, one under the other, and a ragged left edge is exactly what makes separating them harder.
+ */
+const RefCell = ({ row }) => (
+  <TableCell>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+      <Box component="span" sx={{ width: 14, flexShrink: 0, display: 'inline-flex' }}>
+        <ColorSwatch color={row.color} />
+      </Box>
+      <Box component="span" sx={mono}>{row.ref}</Box>
+    </Box>
+  </TableCell>
+);
 
 function usePaged(list) {
   const [page, setPage] = useState(0);
@@ -47,9 +67,27 @@ const lotsOf = (rows) => {
   return lots;
 };
 
-/** Storeroom -> hospital table. With a distribution center, one line per supplied hospital and REF. */
+/**
+ * Storeroom -> hospital table. With a distribution center, one line per supplied hospital and REF.
+ *
+ * A REF at zero inside the hospital comes first and carries the balance in red: it is not merely below the
+ * ideal, there is none of it in the hospital, and the next surgery that needs it has nothing to use. The
+ * sort is stable and runs inside each hospital block, so for a distribution center the lines of one hospital
+ * stay together - the transfer is made per hospital, and interleaving them would undo that.
+ */
 function StoreroomTable({ rows, showHospital }) {
-  const { page, setPage, rows: visible } = usePaged(rows);
+  // Not memoized on purpose: the parent rebuilds this list on every render, so a useMemo keyed on it would
+  // never hit and would only suggest to the next reader that it does. Two filters over a few hundred rows.
+  const blocks = new Map();
+  rows.forEach((r) => {
+    if (!blocks.has(r.hospitalId)) blocks.set(r.hospitalId, []);
+    blocks.get(r.hospitalId).push(r);
+  });
+  const ordered = [...blocks.values()].flatMap((block) => [
+    ...block.filter((r) => r.hospitalBalance === 0),
+    ...block.filter((r) => r.hospitalBalance !== 0),
+  ]);
+  const { page, setPage, rows: visible } = usePaged(ordered);
   return (
     <>
       <TableContainer>
@@ -65,9 +103,15 @@ function StoreroomTable({ rows, showHospital }) {
             {visible.map((r) => (
               <TableRow key={`${r.hospitalId}-${r.materialId}`} hover>
                 {showHospital && <TableCell>{r.hospitalName}</TableCell>}
-                <TableCell sx={mono}>{r.ref}</TableCell>
+                <RefCell row={r} />
                 <TableCell>{r.description}</TableCell>
-                <TableCell align="right">{r.hospitalBalance}</TableCell>
+                {/* Only the cell is marked, not the whole row: the row is already a row that needs
+                    replenishing, and painting all of it would drown the one number that is the problem. */}
+                <TableCell align="right" sx={r.hospitalBalance === 0
+                  ? { color: tokens.error, fontWeight: 700, backgroundColor: tokens.errorBg }
+                  : undefined}>
+                  {r.hospitalBalance}
+                </TableCell>
                 <TableCell align="right">{r.hospitalIdeal}</TableCell>
                 <TableCell align="right">{r.storeroomBalance}</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 700 }}>{r.replenishFromStoreroom}</TableCell>
@@ -201,7 +245,7 @@ export default function ReplenishmentTab({ hospital, hospitals }) {
           action={toOrder.length > 0 && (
             <Button variant="contained" startIcon={<PictureAsPdfOutlined />} onClick={generateOrder}
               disabled={sending || included.length === 0}>
-              Gerar PDF para WhatsApp
+              Gerar PDF
             </Button>
           )}>
           {toOrder.length === 0 ? <Empty>Nada a pedir: tudo está no ideal total.</Empty> : (
@@ -224,7 +268,7 @@ export default function ReplenishmentTab({ hospital, hospitals }) {
                             <Checkbox checked={Boolean(o.include)} onChange={(e) => setOrderField(r.materialId, { include: e.target.checked })}
                               inputProps={{ 'aria-label': `Incluir ${r.ref} no pedido` }} />
                           </TableCell>
-                          <TableCell sx={mono}>{r.ref}</TableCell>
+                          <RefCell row={r} />
                           <TableCell>{r.description}</TableCell>
                           <TableCell align="right">{r.hospitalBalance + r.storeroomBalance}</TableCell>
                           <TableCell align="right">{r.idealTotal}</TableCell>

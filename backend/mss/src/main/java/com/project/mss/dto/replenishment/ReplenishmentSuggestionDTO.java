@@ -13,6 +13,7 @@ public record ReplenishmentSuggestionDTO(
         Long materialId,
         String ref,
         String description,
+        String color,
         int hospitalIdeal,
         int idealTotal,
         int hospitalBalance,
