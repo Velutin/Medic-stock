@@ -65,6 +65,15 @@ public class AccessControlService {
     }
 
     /**
+     * Whether the current user is an administrator, without refusing the request. Used where a read-only user
+     * may see part of the answer and not the rest: the storeroom balance, for instance, which is internal
+     * information and must not reach the read-only profile even as a column of zeros.
+     */
+    public boolean isManager() {
+        return currentUser().isManager();
+    }
+
+    /**
      * Lot-level stock (lots, expiry dates, movements) is visible to administrators and to read-only
      * users of their hospitals, but not to surgical techs, who only see the stock summary.
      */

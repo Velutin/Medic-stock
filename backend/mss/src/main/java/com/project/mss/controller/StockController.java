@@ -57,7 +57,10 @@ public class StockController {
     @GetMapping("/lots")
     @Operation(summary = "Stock by lot and hospital (administrators and read-only users; not surgical techs)",
                description = "Without hospitalId, searches every hospital the user can see (locates a lot anywhere). term matches lot "
-                       + "number, REF, name, description or GTIN. Sorted by REF, expiry date and hospital. Paginated.")
+                       + "number, REF, name, description or GTIN. Sorted by REF, expiry date and hospital. Paginated. "
+                       + "An administrator gets the balance inside the hospital and in the storeroom; a read-only user "
+                       + "gets only what is inside the hospital, with storeroomQuantity zero and without the lots that "
+                       + "exist only in the storeroom.")
     public Page<LotStockDTO> lots(@RequestParam(required = false) String term,
                                   @RequestParam(required = false) Long hospitalId,
                                   @ParameterObject @PageableDefault(size = 50) Pageable pageable) {
@@ -81,7 +84,8 @@ public class StockController {
     @Operation(summary = "Stock of the materials matching a REF, name or description, per hospital and lot",
                description = "Partial match: '1032' returns every REF containing 1032; empty returns the whole catalog. "
                        + "Without hospitalId, returns every hospital visible to the user (useful for audits). "
-                       + "Totals ignore expired lots. Paginated by material.")
+                       + "Totals ignore expired lots. Paginated by material. A read-only user gets the hospital "
+                       + "balance only, with the storeroom left out of the totals and of the lot rows.")
     public Page<MaterialStockDTO> materialStock(@RequestParam(required = false) String term,
                                                 @RequestParam(required = false) Long hospitalId,
                                                 @RequestParam(defaultValue = "false") boolean includeExpired,

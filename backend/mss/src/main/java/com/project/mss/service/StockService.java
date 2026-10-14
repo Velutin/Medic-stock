@@ -300,6 +300,9 @@ public class StockService {
      * Stock of every material matching the term (REF, name or description, partial match),
      * per hospital and per lot, restricted to the hospitals the user can see.
      * With hospitalId, only that hospital is returned. Totals ignore expired lots.
+     *
+     * As in the tab "by lot", the storeroom belongs to the administrator's view only. For a read-only user
+     * the storeroom balance is left out of the totals and of the lot rows.
      */
     @Transactional(readOnly = true)
     public Page<MaterialStockDTO> materialStock(String term, Long hospitalId, boolean includeExpired,
@@ -312,6 +315,8 @@ public class StockService {
         var allowed = hospitalId != null
                 ? java.util.Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
                 : accessControlService.allowedHospitals();
+        // Resolved once: isManager reloads the user from the database, and the loop below runs per stock row.
+        boolean manager = accessControlService.isManager();
         LocalDate today = LocalDate.now();
 
         // materialId -> hospitalId -> lotId -> {hospital, storeroom}
@@ -322,6 +327,9 @@ public class StockService {
         for (Stock e : stockRepository.listByMaterials(ids)) {
             Long hId = e.getHospital().getId();
             if (!allowed.contains(hId)) continue;
+            // Dropped before the row is created, so a lot sitting only in the storeroom does not come back
+            // to a read-only user as a row of zeros - which would still reveal that the lot exists.
+            if (!manager && e.getLocation() == Location.STOREROOM) continue;
             Lot l = e.getLot();
             if (!includeExpired && l.isExpired(today)) continue;
             hospitals.putIfAbsent(hId, e.getHospital());
@@ -359,9 +367,19 @@ public class StockService {
     }
 
     /**
-     * Administrator's stock tab "by lot": one row per lot and hospital, for one hospital or every hospital
-     * (hospitalId empty). term searches lot number, REF, name, description and GTIN, so a lot can be located
-     * across every hospital.
+     * Stock tab "by lot": one row per lot and hospital, for one hospital or every hospital (hospitalId
+     * empty). term searches lot number, REF, name, description and GTIN, so a lot can be located across
+     * every hospital.
+     *
+     * The location depends on the profile, and that is the whole point of the method. An administrator sees
+     * both balances, because locating a lot anywhere - including waiting in the storeroom - is what he uses
+     * this tab for. A read-only user sees only what is inside the hospital: the storeroom is the company's
+     * own stock, not the hospital's, and it must not reach that profile. Filtering by location also drops
+     * the rows whose balance exists only in the storeroom, which would otherwise show up as a lot the
+     * hospital does not have.
+     *
+     * The decision lives here, and not in the screen, because hiding a column in the frontend leaves the
+     * endpoint answering the same data to anyone holding a valid token.
      */
     @Transactional(readOnly = true)
     public Page<LotStockDTO> searchLots(String term, Long hospitalId, Pageable pageable) {
@@ -371,6 +389,9 @@ public class StockService {
                 : accessControlService.allowedHospitals();
         if (hospitals.isEmpty()) return Page.empty(pageable);
         String t = term == null || term.isBlank() ? null : term.trim();
+        if (!accessControlService.isManager()) {
+            return stockRepository.searchLotsAt(hospitals, t, Location.HOSPITAL, pageable);
+        }
         return stockRepository.searchLots(hospitals, t, pageable);
     }
 
@@ -406,12 +427,19 @@ public class StockService {
                 : searchLots(term, hospitalId, page);
     }
 
+    /**
+     * Where a lot is, across the hospitals the user can see. A read-only user gets only the balances inside
+     * the hospitals: the storeroom is left out, as in the other two stock views, so the three answers about
+     * the same lot never disagree about what that profile may know.
+     */
     @Transactional(readOnly = true)
     public List<LotBalanceDTO> findLotLocations(Long lotId) {
         accessControlService.requireLotAccess();
         var allowed = accessControlService.allowedHospitals();
+        boolean manager = accessControlService.isManager();
         return stockRepository.listByLot(lotId).stream()
                 .filter(e -> allowed.contains(e.getHospital().getId()))
+                .filter(e -> manager || e.getLocation() == Location.HOSPITAL)
                 .map(e -> new LotBalanceDTO(e.getHospital().getId(), e.getHospital().getName(), e.getLocation(),
                         e.getQuantity()))
                 .toList();

@@ -37,16 +37,26 @@ function useDebounced(value, delay = 350) {
 /**
  * Stock by lot, in one of the two locations. "Every hospital" locates a lot anywhere.
  *
- *  - location HOSPITAL (administrators and read-only users): what is inside each hospital, with the
- *    storeroom balance alongside for reference. The pencil edits the item and the hospital balance.
+ *  - location HOSPITAL (administrators and read-only users): what is inside each hospital. For an
+ *    administrator the storeroom balance comes alongside for reference (withStoreroom); a read-only user
+ *    sees the hospital column only, and the API answers him without the storeroom at all. The pencil edits
+ *    the item and the hospital balance.
  *  - location STOREROOM (administrators): what is in the storerooms waiting to be transferred, including
  *    the storeroom of a distribution center. The pencil edits the item and the storeroom balance.
  */
 export default function LotView({ hospitals, hospitalId, onHospitalChange, canAdjust, reloadKey,
-                                  location = 'HOSPITAL', term, onTermChange, misplaced = false, onMisplacedChange }) {
+                                  location = 'HOSPITAL', term, onTermChange, misplaced = false, onMisplacedChange,
+                                  withStoreroom = true }) {
   const notify = useNotify();
   const isMobile = useMediaQuery('(max-width:899.95px)');
   const storeroom = location === 'STOREROOM';
+  /*
+   * The second column ("Na sala") only makes sense in the hospital view and only for an administrator. For a
+   * read-only user the API already leaves the storeroom out, so the column would always read zero - and a
+   * zero there would claim the storeroom is empty instead of saying nothing about it. The guard here is
+   * about not stating a falsehood; what protects the data is the endpoint.
+   */
+  const storeroomColumn = !storeroom && withStoreroom;
   // The search lives in the page so the export button of the header can send the same filters
   const debouncedTerm = useDebounced(term);
   const [page, setPage] = useState(0);
@@ -153,7 +163,7 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
               <Box sx={{ mt: 1 }}><ExpiryCell row={r} /></Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
                 <Typography variant="body2" component="div">{storeroom ? 'Na sala' : 'No hospital'}: {quantityCell(r)}</Typography>
-                {!storeroom && <Typography variant="body2" color="text.secondary">Na sala: {r.storeroomQuantity}</Typography>}
+                {storeroomColumn && <Typography variant="body2" color="text.secondary">Na sala: {r.storeroomQuantity}</Typography>}
               </Box>
             </Paper>
           ))}
@@ -170,7 +180,7 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
                 <TableCell>Validade</TableCell>
                 {allHospitals && <TableCell>{storeroom ? 'Sala' : 'Hospital'}</TableCell>}
                 <TableCell align="right">{storeroom ? 'Na sala' : 'No hospital'}</TableCell>
-                {!storeroom && <TableCell align="right">Na sala</TableCell>}
+                {storeroomColumn && <TableCell align="right">Na sala</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -183,7 +193,7 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
                   <TableCell><ExpiryCell row={r} /></TableCell>
                   {allHospitals && <TableCell>{r.hospital}</TableCell>}
                   <TableCell align="right">{quantityCell(r)}</TableCell>
-                  {!storeroom && <TableCell align="right">{r.storeroomQuantity}</TableCell>}
+                  {storeroomColumn && <TableCell align="right">{r.storeroomQuantity}</TableCell>}
                 </TableRow>
               ))}
             </TableBody>
