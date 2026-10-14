@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -249,8 +250,12 @@ public class StockEntryService {
     }
 
     /**
-     * Finds or creates each lot, refuses expired ones and sums repeated lots. An expiry typed as MM/AAAA reuses the
-     * lot with the same number and expiry month (e.g. registered before from a QR code with the full date).
+     * Finds or creates each lot, refuses expired ones and sums repeated lots.
+     *
+     * The two directions meet on the same lot. An expiry typed as MM/AAAA reuses the lot with the same number
+     * and expiry month (registered before from a QR code with the full date); a full date, in turn, replaces
+     * the day-1 placeholder an earlier MM/AAAA entry left behind. Without the second direction, scanning a
+     * lot that had once been typed by month created a second row for the same physical lot.
      */
     private Map<Long, ResolvedItem> resolveItems(List<EntryFormDTO.Item> items) {
         LocalDate today = LocalDate.now();
@@ -265,12 +270,56 @@ public class StockEntryService {
                 throw new BusinessRuleException(String.format("Lot %s (REF %s) is expired and cannot be received",
                         number, material.getRef()));
             }
-            if (lot == null) lot = materialService.getOrCreateLot(material, item.lot(), item.expiryDate());
+            if (lot == null) lot = fullDateLot(material, number, item.lot(), item.expiryDate());
             Lot resolved = lot;
             result.merge(resolved.getId(), new ResolvedItem(resolved, item.quantity()),
                     (a, b) -> new ResolvedItem(a.lot(), a.quantity() + b.quantity()));
         }
         return result;
+    }
+
+    /**
+     * Lot for an entry that carries the full expiry date - a QR code, or a date typed as DD/MM/AAAA.
+     *
+     * The exact date wins. Failing it, a lot of the same number registered on day 1 of the same month is the
+     * placeholder an earlier MM/AAAA entry left behind: that day was never read from a label, it is what the
+     * system writes when only the month is known. So the full date now in hand replaces it, and both entries
+     * stay on a single lot instead of splitting the stock of one physical lot between two rows.
+     *
+     * A lot is shared by every hospital, so the date is corrected everywhere at once. The change is written
+     * to the stock history, exactly as an administrator's own lot correction is - an expiry date that moves
+     * on its own has to be visible somewhere.
+     */
+    private Lot fullDateLot(Material material, String number, String rawNumber, LocalDate expiry) {
+        Optional<Lot> exact = lotRepository
+                .findByMaterialIdAndNumberIgnoreCaseAndExpiryDate(material.getId(), number, expiry);
+        if (exact.isPresent()) return exact.get();
+
+        Lot placeholder = dayOneLot(material, number, expiry);
+        if (placeholder == null) {
+            return materialService.getOrCreateLot(material, rawNumber, expiry);
+        }
+        String before = placeholder.getNumber() + " (" + placeholder.getExpiryDate() + ")";
+        placeholder.setExpiryDate(expiry);
+        Lot saved = lotRepository.saveAndFlush(placeholder);
+        stockService.recordLotCorrection(saved, before, saved.getNumber() + " (" + expiry + ")",
+                "Full expiry date read at the entry, replacing the month-only date.");
+        return saved;
+    }
+
+    /**
+     * The only lot of this number registered on day 1 of the expiry month: the mark left by an entry typed as
+     * MM/AAAA. Null when there is none and also when there is more than one - with the month ambiguous,
+     * nothing is corrected on its own and the entry goes on to create its own lot.
+     */
+    private Lot dayOneLot(Material material, String number, LocalDate expiry) {
+        YearMonth month = YearMonth.from(expiry);
+        List<Lot> placeholders = lotRepository
+                .findByMaterialIdAndNumberIgnoreCaseOrderByExpiryDateAsc(material.getId(), number).stream()
+                .filter(l -> l.getExpiryDate().getDayOfMonth() == 1
+                        && YearMonth.from(l.getExpiryDate()).equals(month))
+                .toList();
+        return placeholders.size() == 1 ? placeholders.get(0) : null;
     }
 
     /** Existing lot of the material with this number and expiry month; null when there is none. */

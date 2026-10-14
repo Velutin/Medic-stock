@@ -175,24 +175,33 @@ public class LotScanService {
 
     /**
      * Picks one lot among the candidates (same number, possibly several materials or expiry dates):
-     *  1. with the expiry date from the code, keeps only that date;
-     *  2. if more than one remains, keeps the ones with balance inside the surgery hospital;
+     *  1. keeps the lots with balance inside the surgery hospital, when any of them has it;
+     *  2. among those, keeps the exact date of the code and, failing it, the ones of the same month;
      *  3. exactly one left -> FOUND; none -> NOT_FOUND; several -> AMBIGUOUS (becomes a pending issue).
+     *
+     * The balance comes before the date, and the order is the whole point. The same physical lot can sit in
+     * more than one row - an entry typed as MM/AAAA registers it on day 1, a later QR entry registers the
+     * full date - and only one of those rows holds the stock. Narrowing by the date first lands on the empty
+     * row and refuses the withdrawal with the material sitting in the hospital, which is what used to happen.
+     *
+     * Step 2 still refuses a date from another month. Tolerating it would take the units from a group
+     * sterilized on another day, and the expiry printed on the consumption sheet would not be the one on the
+     * label in the patient's record.
      */
     private Result choose(List<Lot> candidates, LocalDate expiryDate, Hospital hospital, String lotNumber, String ref) {
         List<Lot> list = candidates;
+        if (hospital != null) {
+            List<Lot> withBalance = list.stream()
+                    .filter(l -> stockService.balance(l, hospital, Location.HOSPITAL) > 0)
+                    .toList();
+            if (!withBalance.isEmpty()) list = withBalance;
+        }
         if (expiryDate != null) {
             List<Lot> exact = list.stream().filter(l -> l.getExpiryDate().equals(expiryDate)).toList();
             // Lots typed as MM/AAAA are stored on day 1: the label's full date still matches by month
             YearMonth month = YearMonth.from(expiryDate);
             list = !exact.isEmpty() ? exact
                     : list.stream().filter(l -> YearMonth.from(l.getExpiryDate()).equals(month)).toList();
-        }
-        if (list.size() > 1 && hospital != null) {
-            List<Lot> withBalance = list.stream()
-                    .filter(l -> stockService.balance(l, hospital, Location.HOSPITAL) > 0)
-                    .toList();
-            if (!withBalance.isEmpty()) list = withBalance;
         }
         if (list.isEmpty()) return new Result(Status.NOT_FOUND, null, List.of(), lotNumber, ref);
         if (list.size() > 1) return new Result(Status.AMBIGUOUS, null, list, lotNumber, ref);
