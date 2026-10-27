@@ -15,6 +15,27 @@ const READER = {
 const COOLDOWN_MS = 800;
 /** Attempts without any code in front of the camera before the same code can be accepted again (~0.6 s). */
 const MISSES_TO_REARM = 3;
+/**
+ * How many times the same text has to be decoded before it is accepted.
+ *
+ * A 1D barcode carries no error correction: Code 128 has a single check character, modulo 103, so a decoding
+ * that loses the module synchronisation still has about one chance in 103 of passing the check and coming
+ * back as a plausible string. With tryHarder, tryRotate and tryDownscale the reader makes many attempts per
+ * frame, several times a second, which turns that rare event into something that happens every few weeks: it
+ * is what recorded lot 5714458 as Z0&71"458, a reading whose middle and end are right and whose start slipped.
+ *
+ * Asking for the same text twice is what the single check character cannot do. A synchronisation error does
+ * not repeat itself identically, so two equal readings take the odds from 1 in 103 to roughly 1 in 10000 -
+ * and, unlike checking which characters came back, it also catches a corruption that happens to land on
+ * digits only, which for lots that are all numbers is the one that would go unnoticed.
+ */
+const CONFIRMATIONS = 2;
+/**
+ * Window in which the confirmation has to arrive. It is counted from the previous decoding of the same text,
+ * not from the first one, so a label that only decodes now and then still goes through: what breaks the
+ * confirmation is a long gap, not the failed attempts in between. A different text simply starts over.
+ */
+const CONFIRM_WINDOW_MS = 1200;
 /** Pause between two attempts, on top of the time the decoding itself takes. */
 const INTERVAL_MS = 120;
 /**
@@ -117,13 +138,18 @@ function cameraMessage(err) {
  * Live camera reader (rear camera) for Data Matrix, QR codes and barcodes. Calls onCode(text) once per
  * reading: the same code is only accepted again after it leaves the camera, so holding the phone over a label
  * does not count it twice. paused: ignores readings (e.g. while the previous one is being processed).
+ *
+ * A reading is only passed on after the same text has been decoded CONFIRMATIONS times (see the constant):
+ * one lucky frame is not enough, which is what keeps a decoding error out of the stock.
  */
 export default function BarcodeScanner({ onCode, paused = false }) {
   const frame = useRef(null);
   const streamRef = useRef(null);
   const onCodeRef = useRef(onCode);
   const pausedRef = useRef(paused);
-  const state = useRef({ last: '', at: 0, misses: 0, failures: 0 });
+  // pending/pendingAt/pendingSeen: the reading waiting to be confirmed, when it was last seen and how many
+  // times it has been decoded. last/at: the reading already accepted, for the de-duplication and the cooldown.
+  const state = useRef({ last: '', at: 0, misses: 0, failures: 0, pending: '', pendingAt: 0, pendingSeen: 0 });
   const [error, setError] = useState(null);
   const [resolution, setResolution] = useState(null);
   const [cameras, setCameras] = useState([]);
@@ -162,6 +188,12 @@ export default function BarcodeScanner({ onCode, paused = false }) {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d', { willReadFrequently: true });
 
+    /** Forgets the reading that was waiting to be confirmed. */
+    const dropPending = (s) => {
+      s.pending = '';
+      s.pendingSeen = 0;
+    };
+
     const accept = (result) => {
       const s = state.current;
       if (!result) {
@@ -169,9 +201,32 @@ export default function BarcodeScanner({ onCode, paused = false }) {
         return;
       }
       const now = Date.now();
-      const sameAsLast = result.text === s.last && s.misses < MISSES_TO_REARM;
+      // The code left the camera long enough for the same label to count as a new reading. It is read here,
+      // before the counter is cleared, and only weighed when a candidate starts: the frame that opens the
+      // candidate is the one that clears the misses, so asking again on the confirming frame would always
+      // say no and the same label could never be read a second time.
+      const rearmed = s.misses >= MISSES_TO_REARM;
       s.misses = 0;
-      if (pausedRef.current || sameAsLast || now - s.at < COOLDOWN_MS) return;
+      if (pausedRef.current || now - s.at < COOLDOWN_MS) {
+        dropPending(s);
+        return;
+      }
+      // First sighting, a different text, or too long since the last one: this reading starts the count over.
+      if (result.text !== s.pending || now - s.pendingAt > CONFIRM_WINDOW_MS) {
+        // Still the label that was just accepted, held in front of the camera: not a new reading.
+        if (result.text === s.last && !rearmed) {
+          dropPending(s);
+          return;
+        }
+        s.pending = result.text;
+        s.pendingAt = now;
+        s.pendingSeen = 1;
+        return;
+      }
+      s.pendingAt = now;
+      s.pendingSeen += 1;
+      if (s.pendingSeen < CONFIRMATIONS) return;
+      dropPending(s);
       s.last = result.text;
       s.at = now;
       if (navigator.vibrate) navigator.vibrate(60);
