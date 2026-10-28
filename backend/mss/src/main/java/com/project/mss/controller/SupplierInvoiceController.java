@@ -120,7 +120,7 @@ public class SupplierInvoiceController {
                        + "mailbox yet. The entry uses it to say so while the box is still open, instead of "
                        + "letting the person find out when the lots turn into pending issues.")
     public ResponseEntity<InvoiceDTO> byKey(@PathVariable String key) {
-        return supplierInvoiceService.byAccessKey(key)
+        return invoiceService.byAccessKey(key)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
