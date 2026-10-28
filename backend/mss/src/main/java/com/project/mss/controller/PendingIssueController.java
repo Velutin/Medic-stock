@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.web.bind.annotation.*;
 
+import com.project.mss.dto.invoice.InvoiceOptionDTO;
 import com.project.mss.dto.surgery.PendingIssueDTO;
 import com.project.mss.dto.surgery.PendingIssueStatusUpdateDTO;
 import com.project.mss.dto.surgery.PendingLotOptionDTO;
@@ -36,6 +37,15 @@ public class PendingIssueController {
                        + "registered lots with the number read); the lots with the number read come first.")
     public List<PendingLotOptionDTO> suggestions(@PathVariable Long id) {
         return pendingIssueService.suggestions(id);
+    }
+
+    @GetMapping("/{id}/invoice-options")
+    @Operation(summary = "Open invoices owing the lot of a pending issue about a missing invoice",
+               description = "What the administrator picks from instead of typing a number from memory. "
+                       + "The invoices declared at the entry come marked, and an empty answer means no open "
+                       + "invoice is owing that lot - usually because its XML has not arrived yet.")
+    public List<InvoiceOptionDTO> invoiceOptions(@PathVariable Long id) {
+        return pendingIssueService.invoiceOptions(id);
     }
 
     @PatchMapping("/{id}")

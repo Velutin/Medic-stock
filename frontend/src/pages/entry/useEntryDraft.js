@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import useHospitals from '../../hooks/useHospitals';
 import { daysUntil, formatDate } from '../../utils/format';
@@ -54,6 +54,19 @@ export default function useEntryDraft() {
   const [refConflict, setRefConflict] = useState(null);
   // O que as notas ainda devem, respondido ao salvar: é a conferência da caixa recém-aberta
   const [invoiceSummary, setInvoiceSummary] = useState(null);
+  /*
+   * Com a nota exigida, a entrada só grava com pelo menos uma nota lida, e o vínculo passa a valer só para
+   * as notas lidas. A exigência é lida uma vez ao abrir a tela; se a leitura falhar ela fica desligada, que
+   * é o lado seguro: nunca travar uma entrada por causa de uma configuração que não foi possível consultar.
+   */
+  const [invoiceRequired, setInvoiceRequired] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api('/invoices/settings')
+      .then((s) => { if (alive) setInvoiceRequired(s?.['invoice.required.on.entry'] === 'true'); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const setField = useCallback((field, value) => setDraft((d) => ({ ...d, [field]: value })), []);
 
@@ -210,7 +223,7 @@ export default function useEntryDraft() {
   return {
     destinations, loadingHospitals, draft, setField, addItem, requestAdd, refConflict, confirmRefChange, cancelRefChange,
     removeItem, totals, addInvoiceKey, removeInvoiceKey,
-    invoiceSummary, setInvoiceSummary,
+    invoiceSummary, setInvoiceSummary, invoiceRequired,
     editing, startEdit, reset, headerError, save, saving, historyKey,
   };
 }

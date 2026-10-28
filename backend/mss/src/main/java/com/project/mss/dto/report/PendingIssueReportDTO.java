@@ -17,5 +17,5 @@ import com.project.mss.model.enums.PendingIssueStatus;
 public record PendingIssueReportDTO(Long id, Long surgeryId, LocalDate surgeryDate, String patientName, Long hospitalId,
                                     String hospital, String enteredCode, String enteredRef, int quantity,
                                     PendingIssueReason reason, String createdBy, PendingIssueStatus status,
-                                    String resolution, String resolvedBy, Long entryId, LocalDate date,
-                                    LocalDateTime createdAt) { }
+                                    String resolution, String resolvedBy, Long entryId, String declaredInvoice,
+                                    LocalDate date, LocalDateTime createdAt) { }

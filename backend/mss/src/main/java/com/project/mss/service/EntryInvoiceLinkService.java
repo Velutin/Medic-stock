@@ -79,13 +79,22 @@ public class EntryInvoiceLinkService {
     /**
      * Links the items of an entry to the invoices that owe them.
      *
-     * accessKeys are the DANFEs scanned at the entry. They do not restrict the match - a box regularly holds
-     * items of an invoice whose barcode nobody scanned - they only come first, because the invoice in your
-     * hand is the likeliest owner of what you are unpacking.
+     * accessKeys are the DANFEs scanned at the entry, and what they are worth depends on the setting.
+     *
+     * With the invoice NOT required - the state in which the stock is first loaded, when almost nothing has
+     * an invoice yet - they only come first in the order: any open invoice owing the lot may take it, and
+     * the one in your hand is simply the likeliest owner of what you are unpacking.
+     *
+     * With the invoice required, only the scanned invoices may take a lot. That is the whole point of
+     * requiring it: a lot number can be owed by two open invoices, and picking one by date is picking by
+     * luck. A lot that none of the scanned invoices owes becomes a pending issue carrying the numbers that
+     * were declared, which is a question for the administrator and not a guess made at the bench.
      */
     @Transactional
     public EntryInvoiceSummaryDTO link(StockEntry entry, List<String> accessKeys) {
+        boolean required = settingService.invoiceRequiredOnEntry();
         Set<Long> preferred = preferredInvoices(accessKeys);
+        String declared = declaredNumbers(accessKeys);
         List<StockEntryItemInvoice> written = new ArrayList<>();
         List<EntryInvoiceSummaryDTO.UnlinkedLine> unlinked = new ArrayList<>();
         Map<StockEntryItem, Integer> withoutInvoice = new LinkedHashMap<>();
@@ -95,9 +104,13 @@ public class EntryInvoiceLinkService {
             String lotKey = Lot.comparableNumber(item.getLot().getNumber());
 
             List<SupplierInvoiceItem> owed = new ArrayList<>(invoiceItemRepository.owedByLot(lotKey, OPEN));
-            // Invoices whose DANFE was scanned come first; the rest keeps the oldest-first order, which is
-            // the one about to become an alert
-            owed.sort(Comparator.comparing(i -> preferred.contains(i.getInvoice().getId()) ? 0 : 1));
+            // Required: only what was scanned counts. Otherwise the scanned ones merely come first, and the
+            // rest keeps the oldest-first order, which is the one about to become an alert
+            if (required) {
+                owed.removeIf(i -> !preferred.contains(i.getInvoice().getId()));
+            } else {
+                owed.sort(Comparator.comparing(i -> preferred.contains(i.getInvoice().getId()) ? 0 : 1));
+            }
 
             for (SupplierInvoiceItem invoiceItem : owed) {
                 if (remaining <= 0) break;
@@ -127,7 +140,7 @@ public class EntryInvoiceLinkService {
         // point: an invoice in your hand with nothing received from it is the one to look into
         accessKeys(accessKeys).forEach(touched::add);
 
-        int raised = raisePendingIssues(entry, withoutInvoice);
+        int raised = raisePendingIssues(entry, withoutInvoice, declared);
         return summary(touched, unlinked, instrumentsAwaiting(touched), raised);
     }
 
@@ -193,6 +206,25 @@ public class EntryInvoiceLinkService {
         return ids;
     }
 
+    /**
+     * Numbers of the scanned DANFEs, read from the keys themselves.
+     *
+     * From the key and not from the database: the usual reason a lot ends up as a pending issue is that the
+     * invoice has not been read from the e-mail yet, so there is no row to take the number from - and that
+     * is exactly the case where knowing the number is worth most.
+     */
+    private String declaredNumbers(List<String> accessKeys) {
+        if (accessKeys == null || accessKeys.isEmpty()) return null;
+        LinkedHashSet<String> numbers = new LinkedHashSet<>();
+        for (String key : accessKeys) {
+            NfeAccessKey parsed = NfeAccessKey.parse(key);
+            if (parsed != null) numbers.add(parsed.number());
+        }
+        if (numbers.isEmpty()) return null;
+        String joined = String.join(", ", numbers);
+        return joined.length() > 120 ? joined.substring(0, 120) : joined;
+    }
+
     private List<SupplierInvoice> accessKeys(List<String> accessKeys) {
         if (accessKeys == null || accessKeys.isEmpty()) return List.of();
         List<SupplierInvoice> invoices = new ArrayList<>();
@@ -240,7 +272,8 @@ public class EntryInvoiceLinkService {
      * With the requirement off, nothing is raised: while the invoices are still catching up every lot would
      * become a pending issue, and a list of everything is a list of nothing.
      */
-    private int raisePendingIssues(StockEntry entry, Map<StockEntryItem, Integer> withoutInvoice) {
+    private int raisePendingIssues(StockEntry entry, Map<StockEntryItem, Integer> withoutInvoice,
+                                   String declared) {
         if (!settingService.invoiceRequiredOnEntry() || withoutInvoice.isEmpty()) return 0;
         for (Map.Entry<StockEntryItem, Integer> line : withoutInvoice.entrySet()) {
             StockEntryItem item = line.getKey();
@@ -251,6 +284,7 @@ public class EntryInvoiceLinkService {
             issue.setEnteredRef(item.getLot().getMaterial().getRef());
             issue.setQuantity(line.getValue());
             issue.setReason(PendingIssueReason.WITHOUT_INVOICE);
+            issue.setDeclaredInvoice(declared);
             issue.setStatus(PendingIssueStatus.OPEN);
             pendingIssueRepository.save(issue);
         }
@@ -308,6 +342,15 @@ public class EntryInvoiceLinkService {
                 accessControlService.currentUser()));
         invoice.refreshStatus();
         invoiceRepository.save(invoice);
+    }
+
+    /** Open invoices owing a lot, for the screen that settles a pending issue about a missing invoice. */
+    @Transactional(readOnly = true)
+    public List<SupplierInvoiceItemLot> invoicesOwing(String lotNumber) {
+        if (lotNumber == null || lotNumber.isBlank()) return List.of();
+        return lotRepository.owedByKey(Lot.comparableNumber(lotNumber), OPEN).stream()
+                .filter(l -> l.getInvoiceItem().missing() > 0)
+                .toList();
     }
 
     /** The invoice as it is printed, or without the leading zeros the person may have typed. */

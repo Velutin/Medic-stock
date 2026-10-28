@@ -46,6 +46,20 @@ const INTERVAL_MS = 120;
  */
 const AIM = 0.7;
 /**
+ * Proportions of the wide aim, used to read the barcode of a DANFE.
+ *
+ * The code of an invoice is a long, low Code 128 - nothing like the labels of the material - and a square
+ * aim around it wastes most of the decoded pixels on the paper beside it. The wide aim is also what tells
+ * you, without reading a word, that the screen is now waiting for a note and not for a lot.
+ *
+ * WIDE_HEIGHT is a fraction of the frame height, which is what the screen shows whole; the width is the
+ * visible part of the frame, since the preview crops the sides to fill the box.
+ */
+const WIDE_HEIGHT = 0.3;
+const WIDE_WIDTH = 0.94;
+/** Visible width of the frame: the preview fills a 4/3 box, cutting off whatever is wider than that. */
+const visibleWidth = (width, height) => Math.min(width, Math.round((height * 4) / 3));
+/**
  * Rear camera at the highest resolution the phone offers, as an "ideal" (a phone that cannot do it gives what
  * it can, and the camera still opens). Without asking, Android gives around 640x480: too few pixels on a small
  * code, and the user ends up moving the phone closer than the lens can focus.
@@ -142,7 +156,7 @@ function cameraMessage(err) {
  * A reading is only passed on after the same text has been decoded CONFIRMATIONS times (see the constant):
  * one lucky frame is not enough, which is what keeps a decoding error out of the stock.
  */
-export default function BarcodeScanner({ onCode, paused = false }) {
+export default function BarcodeScanner({ onCode, paused = false, wide = false }) {
   const frame = useRef(null);
   const streamRef = useRef(null);
   const onCodeRef = useRef(onCode);
@@ -151,7 +165,6 @@ export default function BarcodeScanner({ onCode, paused = false }) {
   // times it has been decoded. last/at: the reading already accepted, for the de-duplication and the cooldown.
   const state = useRef({ last: '', at: 0, misses: 0, failures: 0, pending: '', pendingAt: 0, pendingSeen: 0 });
   const [error, setError] = useState(null);
-  const [resolution, setResolution] = useState(null);
   const [cameras, setCameras] = useState([]);
   // deviceId: the camera asked for (null = whichever the browser picks). activeId: the one actually open.
   const [deviceId, setDeviceId] = useState(storedCamera);
@@ -239,13 +252,20 @@ export default function BarcodeScanner({ onCode, paused = false }) {
       const width = video.videoWidth;
       const height = video.videoHeight;
       if (!pausedRef.current && width && height) {
-        const side = Math.round(Math.min(width, height) * AIM);
-        canvas.width = side;
-        canvas.height = side;
-        context.drawImage(video, Math.round((width - side) / 2), Math.round((height - side) / 2), side, side,
-          0, 0, side, side);
+        // The decoded area is exactly the one drawn on screen: an aim that promises more than it reads
+        // teaches people to centre the code where it is not being looked at
+        const cropWidth = wide
+          ? Math.round(visibleWidth(width, height) * WIDE_WIDTH)
+          : Math.round(Math.min(width, height) * AIM);
+        const cropHeight = wide
+          ? Math.round(height * WIDE_HEIGHT)
+          : Math.round(Math.min(width, height) * AIM);
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
+        context.drawImage(video, Math.round((width - cropWidth) / 2), Math.round((height - cropHeight) / 2),
+          cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
         try {
-          const results = await readBarcodes(context.getImageData(0, 0, side, side), READER);
+          const results = await readBarcodes(context.getImageData(0, 0, cropWidth, cropHeight), READER);
           if (cancelled) return;
           state.current.failures = 0;
           accept(results.find((r) => r.isValid !== false && r.text));
@@ -282,10 +302,6 @@ export default function BarcodeScanner({ onCode, paused = false }) {
         await video.play();
         if (cancelled) return;
         const settings = opened.getVideoTracks()[0]?.getSettings?.() || {};
-        setResolution({
-          width: settings.width || video.videoWidth,
-          height: settings.height || video.videoHeight,
-        });
         // Labels (and therefore the list of cameras) only exist once permission has been given, which the
         // opening above just did.
         navigator.mediaDevices.enumerateDevices?.()
@@ -319,8 +335,10 @@ export default function BarcodeScanner({ onCode, paused = false }) {
         </Typography>
       ) : (
         <>
-          {/* The aim square is exactly the area that gets decoded (AIM of the frame's shorter side). */}
-          <Box aria-hidden sx={{ position: 'relative', height: `${AIM * 100}%`, aspectRatio: '1 / 1',
+          {/* Drawn exactly over the area that gets decoded: square for labels, wide for the invoice barcode */}
+          <Box aria-hidden sx={{ position: 'relative',
+            height: `${(wide ? WIDE_HEIGHT : AIM) * 100}%`,
+            ...(wide ? { width: `${WIDE_WIDTH * 100}%` } : { aspectRatio: '1 / 1' }),
             border: '2px solid rgba(255, 255, 255, 0.85)', borderRadius: '10px', boxShadow: '0 0 0 2000px rgba(0, 0, 0, 0.25)' }} />
           {cameras.length > 1 && (
             <IconButton onClick={switchCamera} aria-label="Trocar de câmera"
@@ -331,9 +349,7 @@ export default function BarcodeScanner({ onCode, paused = false }) {
           )}
           <Typography sx={{ position: 'absolute', bottom: 10, left: 0, right: 0, textAlign: 'center', color: '#FFFFFF',
             fontSize: 13, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
-            Aponte para o código e toque na tela para focar
-            {resolution ? ` · ${resolution.width}×${resolution.height}` : ''}
-            {cameras.length > 1 ? ` · câmera ${Math.max(0, cameras.findIndex((c) => c.deviceId === activeId)) + 1} de ${cameras.length}` : ''}
+            {wide ? 'Aponte para o código de barras da nota' : 'Aponte para o código'}
           </Typography>
         </>
       )}

@@ -36,6 +36,12 @@ export default function EntryDesktop({ entry }) {
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const { draft, setField, totals, editing } = entry;
+  /*
+   * Com a nota exigida, a entrada não grava sem pelo menos uma nota lida: a obrigação aparece antes do
+   * trabalho, não depois de ler duzentas etiquetas. Correção de entrada fica de fora — ela mexe em algo já
+   * gravado, e travar agora seria mudar a regra de um lançamento feito sob outra.
+   */
+  const missingInvoice = entry.invoiceRequired && !editing && (draft.invoiceKeys || []).length === 0;
   const { item, errors } = reader;
 
   const readCode = async () => {
@@ -232,9 +238,14 @@ export default function EntryDesktop({ entry }) {
               <Typography variant="body2" color="text.secondary">
                 {plural(totals.lots, 'lote', 'lotes')} · {plural(totals.units, 'unidade', 'unidades')}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                {missingInvoice && draft.items.length > 0 && (
+                  <Typography variant="caption" color="warning.main">
+                    Leia a nota fiscal da caixa para registrar a entrada.
+                  </Typography>
+                )}
                 {editing && <Button variant="outlined" onClick={entry.reset}>Cancelar correção</Button>}
-                <Button variant="contained" onClick={submit} disabled={entry.saving || draft.items.length === 0}>
+                <Button variant="contained" onClick={submit} disabled={entry.saving || draft.items.length === 0 || missingInvoice}>
                   {editing ? 'Salvar correção' : 'Registrar entrada na sala'}
                 </Button>
               </Box>

@@ -114,6 +114,17 @@ public class SupplierInvoiceController {
         return invoiceService.close(id, body.get("reason"));
     }
 
+    @GetMapping("/by-key/{key}")
+    @Operation(summary = "Invoice of a scanned DANFE access key",
+               description = "Answers 204 when the key is valid but its XML has not been read from the "
+                       + "mailbox yet. The entry uses it to say so while the box is still open, instead of "
+                       + "letting the person find out when the lots turn into pending issues.")
+    public ResponseEntity<InvoiceDTO> byKey(@PathVariable String key) {
+        return supplierInvoiceService.byAccessKey(key)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
     @GetMapping("/mailbox")
     @Operation(summary = "Messages read from the invoice mailbox, newest first",
                description = "Includes the ones with nothing usable inside, with the reason.")

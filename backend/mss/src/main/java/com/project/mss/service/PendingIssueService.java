@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.project.mss.dto.material.ScannedCodeDTO;
+import com.project.mss.dto.invoice.InvoiceOptionDTO;
 import com.project.mss.dto.surgery.PendingIssueDTO;
 import com.project.mss.dto.surgery.PendingLotOptionDTO;
 import com.project.mss.dto.surgery.PendingIssueStatusUpdateDTO;
@@ -107,6 +108,34 @@ public class PendingIssueService {
         out.sort(Comparator.comparing((PendingLotOptionDTO o) -> !o.sameLot())
                 .thenComparing(PendingLotOptionDTO::ref).thenComparing(PendingLotOptionDTO::expiryDate));
         return out;
+    }
+
+    /**
+     * Open invoices owing the lot of a WITHOUT_INVOICE pending issue, for the screen that settles it.
+     *
+     * The ones declared at the entry come marked, so the usual case - the note was in your hand, its XML
+     * has since arrived - is one click. An empty answer is information too: no open invoice is owing that
+     * lot, which normally means the XML has not come yet and the note has to be asked for again.
+     */
+    @Transactional(readOnly = true)
+    public List<InvoiceOptionDTO> invoiceOptions(Long id) {
+        accessControlService.requireManager();
+        PendingIssue p = pendingIssueRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Pending issue " + id + " not found"));
+        if (p.getReason() != PendingIssueReason.WITHOUT_INVOICE) return List.of();
+
+        Set<String> declared = p.getDeclaredInvoice() == null ? Set.of()
+                : Set.of(p.getDeclaredInvoice().split(",\\s*"));
+        return invoiceLinkService.invoicesOwing(p.getEnteredCode()).stream()
+                .map(l -> {
+                    var item = l.getInvoiceItem();
+                    var invoice = item.getInvoice();
+                    return new InvoiceOptionDTO(invoice.getId(), invoice.getNumber(), invoice.getEmitterName(),
+                            invoice.getIssuedAt() != null ? invoice.getIssuedAt().toLocalDate() : null,
+                            invoice.getStatus().name(), item.getProductCode(), item.getDescription(),
+                            item.missing(), declared.contains(invoice.getNumber()));
+                })
+                .toList();
     }
 
     @Transactional(readOnly = true)

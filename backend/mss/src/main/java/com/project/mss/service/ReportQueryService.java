@@ -598,7 +598,8 @@ public class ReportQueryService {
                 c != null ? c.getSurgeryDate() : null, c != null ? c.getPatientName() : null,
                 i.getHospital().getId(), i.getHospital().getName(), i.getEnteredCode(), i.getEnteredRef(),
                 i.getQuantity(), i.getReason(), c != null ? name(c.getCreatedBy()) : null, i.getStatus(),
-                i.getResolution(), name(i.getResolvedBy()), entryId, date, i.getCreatedAt());
+                i.getResolution(), name(i.getResolvedBy()), entryId, i.getDeclaredInvoice(), date,
+                i.getCreatedAt());
     }
 
     private static int units(Surgery c) {

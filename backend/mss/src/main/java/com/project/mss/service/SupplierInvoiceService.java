@@ -30,6 +30,7 @@ import com.project.mss.repository.SupplierInvoiceRepository;
 import com.project.mss.service.NfeXmlParser.ParsedInvoice;
 import com.project.mss.service.NfeXmlParser.ParsedItem;
 import com.project.mss.service.NfeXmlParser.ParsedLot;
+import com.project.mss.util.NfeAccessKey;
 
 /**
  * Invoices the supplier announced: importing their XML, listing them and closing them.
@@ -199,6 +200,18 @@ public class SupplierInvoiceService {
             return materialRepository.findByRefIgnoreCase(parsed.productCode().trim()).orElse(null);
         }
         return null;
+    }
+
+    /** Invoice of a scanned access key; empty when the key is valid but its XML has not arrived yet. */
+    @Transactional(readOnly = true)
+    public Optional<InvoiceDTO> byAccessKey(String key) {
+        accessControlService.requireManager();
+        NfeAccessKey parsed = NfeAccessKey.parse(key);
+        if (parsed == null) return Optional.empty();
+        int alertDays = settingService.alertDays();
+        return invoiceRepository.findByAccessKey(parsed.digits())
+                .filter(i -> !i.getItems().isEmpty())
+                .map(i -> InvoiceDTO.of(i, alertDays));
     }
 
     /**

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, List, ListItemButton, Radio, Stack,
-  TableCell, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
+  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, List, ListItemButton,
+  ListItemText, Radio, Stack, TableCell, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { api } from '../../api/client';
@@ -65,6 +65,7 @@ function ResolveDialog({ issue, onClose, onDone }) {
   const [search, setSearch] = useState('');
   const [lotId, setLotId] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceOptions, setInvoiceOptions] = useState(null);
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const fullScreen = useMediaQuery('(max-width:599.95px)');
@@ -81,6 +82,8 @@ function ResolveDialog({ issue, onClose, onDone }) {
     // A pendência de entrada não se resolve escolhendo lote: o lote já entrou, falta dizer de que nota ele veio
     if (isWithoutInvoice(issue)) {
       setSuggested([]);
+      setInvoiceOptions(null);
+      api(`/pending-issues/${issue.id}/invoice-options`).then(setInvoiceOptions).catch(() => setInvoiceOptions([]));
       return;
     }
     api(`/pending-issues/${issue.id}/suggestions`).then(setSuggested).catch(() => setSuggested([]));
@@ -175,9 +178,54 @@ function ResolveDialog({ issue, onClose, onDone }) {
               <ToggleButton value="DISCARDED">{withoutInvoice ? 'Veio sem nota' : 'Descartar'}</ToggleButton>
             </ToggleButtonGroup>
             {withoutInvoice && mode === 'RESOLVED' && (
-              <TextField size="small" label="Número da nota" value={invoiceNumber} autoComplete="off"
-                onChange={(e) => setInvoiceNumber(e.target.value.replace(/\D/g, ''))}
-                helperText="A nota já precisa estar no sistema. Se o XML ainda não chegou, peça à empresa para reenviar por e-mail." />
+              <Stack spacing={1.25}>
+                {issue.declaredInvoice && (
+                  <Typography variant="caption" color="text.secondary">
+                    Declarada na entrada: <span style={mono}>{issue.declaredInvoice}</span>
+                  </Typography>
+                )}
+
+                {invoiceOptions === null ? (
+                  <Typography variant="body2" color="text.secondary">Procurando notas com este lote…</Typography>
+                ) : invoiceOptions.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Nenhuma nota aberta está devendo este lote. Normalmente é o XML que ainda não chegou:
+                    peça à empresa para reenviar por e-mail e volte aqui depois.
+                  </Typography>
+                ) : (
+                  <List dense disablePadding>
+                    {invoiceOptions.map((o) => (
+                      <ListItemButton key={o.id} selected={invoiceNumber === o.number}
+                        onClick={() => setInvoiceNumber(o.number)}
+                        sx={{ border: `1px solid ${tokens.border}`, borderRadius: '8px', mb: 0.75, alignItems: 'flex-start' }}>
+                        <Radio size="small" checked={invoiceNumber === o.number} tabIndex={-1} sx={{ p: 0, mt: 0.25, mr: 1 }} />
+                        <ListItemText
+                          primary={(
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              Nota {o.number} · {o.emitter}
+                              {o.declared && (
+                                <Typography component="span" variant="caption" color="success.main">
+                                  {' '}· lida na entrada
+                                </Typography>
+                              )}
+                            </Typography>
+                          )}
+                          secondary={(
+                            <Typography variant="caption" color="text.secondary" sx={mono}>
+                              {o.productCode}{o.description ? ` · ${o.description}` : ''} · faltam {o.missing}
+                            </Typography>
+                          )} />
+                      </ListItemButton>
+                    ))}
+                  </List>
+                )}
+
+                <TextField size="small" label="Número da nota" value={invoiceNumber} autoComplete="off"
+                  onChange={(e) => setInvoiceNumber(e.target.value.replace(/\D/g, ''))}
+                  helperText={invoiceOptions && invoiceOptions.length > 0
+                    ? 'Escolha acima ou digite outro número.'
+                    : 'A nota já precisa estar no sistema para ser vinculada.'} />
+              </Stack>
             )}
             {mode === 'RESOLVED' && !withoutInvoice && (
               <Stack spacing={1.25}>
