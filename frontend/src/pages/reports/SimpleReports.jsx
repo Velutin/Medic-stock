@@ -148,7 +148,9 @@ function LoanLines({ query }) {
   const { data } = useReport('/reports/loans', { ...query, type: 'LOAN' });
   if (!data) return <Loading />;
   const lines = data.flatMap((l) => l.items.map((i, k) => ({ ...i, loan: l, key: `${l.id}-${k}` })));
-  return lines.length === 0 ? <Empty>Nenhum empréstimo no período.</Empty> : (
+  return lines.length === 0 ? (
+    <Empty>{query.lot ? `Nenhum empréstimo com o lote ${query.lot}.` : 'Nenhum empréstimo no período.'}</Empty>
+  ) : (
     <PagedTable items={lines} rowKey={(r) => r.key} minWidth={860}
       columns={[{ label: 'Data' }, { label: 'Origem' }, { label: 'Destino' }, { label: 'REF' }, { label: 'Lote' }, { label: 'Validade' }, { label: 'Qtd.', align: 'right' }, { label: 'Registrado por' }]}
       row={(r) => (<>
@@ -166,7 +168,9 @@ function ReturnsReport({ query }) {
   const { data } = useReport('/reports/loans', { ...query, type: 'RETURN' });
   if (!data) return <Loading />;
   const download = (l) => downloadFile(`/loans/${l.id}/pdf`, `devolucao-${l.id}.pdf`).catch((err) => notify.error(err));
-  return data.length === 0 ? <Empty>Nenhuma devolução no período.</Empty> : (
+  return data.length === 0 ? (
+    <Empty>{query.lot ? `Nenhuma devolução com o lote ${query.lot}.` : 'Nenhuma devolução no período.'}</Empty>
+  ) : (
     <PagedTable items={data} rowKey={(l) => l.id} minWidth={900}
       columns={[{ label: 'Nº' }, { label: 'Data' }, { label: 'Origem' }, { label: 'Motivo' }, { label: 'Itens' }, { label: 'Unidades', align: 'right' }, { label: 'Registrado por' }, { label: 'PDF' }]}
       row={(l) => (<>
@@ -192,15 +196,33 @@ export const MOVEMENT_TYPES = {
 export function MovementsReport({ query }) {
   const { data } = useReport('/reports/movements', query);
   if (!data) return <Loading />;
-  return data.length === 0 ? <Empty>Nenhuma movimentação no período.</Empty> : (
+  const byInvoice = Boolean(query.invoice || query.invoiceId);
+  if (data.length === 0) {
+    return (
+      <Empty>
+        {byInvoice
+          ? (query.invoice ? `Nenhuma movimentação dos lotes da nota ${query.invoice}.` : 'Nenhuma movimentação dos lotes desta nota.')
+          : query.lot ? `Nenhuma movimentação com o lote ${query.lot}.`
+            : 'Nenhuma movimentação no período.'}
+      </Empty>
+    );
+  }
+  return (
     <Stack spacing={1}>
       {data.length >= 3000 && <Typography variant="caption" color="warning.main">Mostrando as 3000 mais recentes: reduza o período para ver todas.</Typography>}
-      <PagedTable items={data} rowKey={(r) => r.id} minWidth={960}
-        columns={[{ label: 'Data' }, { label: 'Tipo' }, { label: 'REF' }, { label: 'Lote' }, { label: 'Qtd.', align: 'right' }, { label: 'Origem' }, { label: 'Destino' }, { label: 'Usuário' }]}
+      {byInvoice && (
+        <Typography variant="caption" color="text.secondary">
+          A busca por nota mostra as movimentações dos lotes que ela trouxe. O sistema controla lote, não
+          cada unidade: um lote que também veio em outra nota aparece nas duas.
+        </Typography>
+      )}
+      <PagedTable items={data} rowKey={(r) => r.id} minWidth={1060}
+        columns={[{ label: 'Data' }, { label: 'Tipo' }, { label: 'REF' }, { label: 'Lote' }, { label: 'Qtd.', align: 'right' }, { label: 'Origem' }, { label: 'Destino' }, { label: 'Nota' }, { label: 'Usuário' }]}
         row={(r) => (<>
           <TableCell>{formatDateTime(r.date)}</TableCell><TableCell>{MOVEMENT_TYPES[r.type] || r.type}</TableCell>
           <TableCell sx={mono}>{r.ref}</TableCell><TableCell sx={mono}>{r.lot}</TableCell><TableCell align="right">{r.quantity}</TableCell>
           <TableCell>{where(r.sourceHospital, r.sourceLocation)}</TableCell><TableCell>{where(r.destinationHospital, r.destinationLocation)}</TableCell>
+          <TableCell sx={mono}>{r.invoice || '—'}</TableCell>
           <TableCell>{r.user || '—'}</TableCell>
         </>)} />
     </Stack>

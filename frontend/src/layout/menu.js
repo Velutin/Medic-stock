@@ -2,6 +2,7 @@ import DashboardOutlined from '@mui/icons-material/DashboardOutlined';
 import Inventory2Outlined from '@mui/icons-material/Inventory2Outlined';
 import MoveToInboxOutlined from '@mui/icons-material/MoveToInboxOutlined';
 import LocalShippingOutlined from '@mui/icons-material/LocalShippingOutlined';
+import LocalPostOfficeOutlined from '@mui/icons-material/LocalPostOfficeOutlined';
 import MedicalServicesOutlined from '@mui/icons-material/MedicalServicesOutlined';
 import AutorenewOutlined from '@mui/icons-material/AutorenewOutlined';
 import SwapHorizOutlined from '@mui/icons-material/SwapHorizOutlined';
@@ -15,6 +16,8 @@ const ADMINS = ['ADMIN', 'MASTER'];
 /** Menu items, routes and the profiles that see each one. */
 export const MENU = [
   { label: 'Painel', path: '/painel', icon: DashboardOutlined, roles: ADMINS },
+  // Antes do Estoque de propósito: o material chega (em transporte), entra e só então vira estoque
+  { label: 'Em transporte', path: '/transporte', icon: LocalPostOfficeOutlined, roles: ADMINS },
   { label: 'Estoque', path: '/estoque', icon: Inventory2Outlined, roles: [...ADMINS, 'SURGICAL_TECH', 'USER'] },
   { label: 'Entrada', path: '/entrada', icon: MoveToInboxOutlined, roles: ADMINS },
   { label: 'Transferência', path: '/transferencia', icon: LocalShippingOutlined, roles: ADMINS },

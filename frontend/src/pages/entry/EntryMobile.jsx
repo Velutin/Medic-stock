@@ -14,6 +14,8 @@ import useItemReader from './useItemReader';
 import MaterialLabel from './MaterialLabel';
 import ExpiryField from './ExpiryField';
 import LotRefChangeDialog from './LotRefChangeDialog';
+import InvoiceKeysField from './InvoiceKeysField';
+import EntryInvoiceDialog from './EntryInvoiceDialog';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -22,7 +24,14 @@ export default function EntryMobile({ entry }) {
   const notify = useNotify();
   const reader = useItemReader();
   const [newItemOpen, setNewItemOpen] = useState(false);
+  const [invoiceCamera, setInvoiceCamera] = useState(false);
   const { draft, setField, totals, editing } = entry;
+  /*
+   * Com a nota exigida, a entrada não grava sem pelo menos uma nota lida: a obrigação aparece antes do
+   * trabalho, não depois de ler duzentas etiquetas. Correção de entrada fica de fora — ela mexe em algo já
+   * gravado, e travar agora seria mudar a regra de um lançamento feito sob outra.
+   */
+  const missingInvoice = entry.invoiceRequired && !editing && (draft.invoiceKeys || []).length === 0;
   const { item, errors } = reader;
   const expiryInput = useRef(null);
   const hasRead = Boolean(item.material || reader.unknown);
@@ -98,15 +107,29 @@ export default function EntryMobile({ entry }) {
         onChange={(e) => setField('entryDate', e.target.value)} InputLabelProps={{ shrink: true }}
         inputProps={{ max: todayIso() }} />
 
+      {/* No celular a nota é lida pela câmera, como o resto: o código do DANFE é largo e baixo, bem
+          diferente das etiquetas, então vale mirar nele com calma */}
+      <InvoiceKeysField entry={entry} withCamera onCameraChange={setInvoiceCamera} />
+
       {/*
-        The camera stops reading once an item is on screen waiting to be typed (lot, expiry date, quantity):
-        with the barcode labels the expiry date is typed by hand, and any code entering the frame meanwhile
-        would be taken as a new product and would replace what had already been filled in. While the lot
-        barcode is still expected the camera keeps reading, because that reading is the next step.
+        Uma câmera por vez. Com as duas abertas (a da nota e a dos itens) a tela fica com dois vídeos quase
+        iguais e não dá para saber qual está lendo o quê — e o celular ainda decodifica os dois ao mesmo
+        tempo à toa. Enquanto a câmera da nota está aberta, a dos itens sai da tela e volta sozinha depois.
+
+        A câmera dos itens também para de ler quando um item está na tela esperando digitação (lote,
+        validade, quantidade): a validade é digitada à mão, e qualquer código que entrasse no quadro seria
+        tomado como um produto novo, substituindo o que já estava preenchido. Enquanto o código de barras do
+        lote ainda é esperado ela continua lendo, porque essa leitura é o próximo passo.
       */}
-      <CodeReader onCode={onCode}
-        busy={reader.reading || newItemOpen || Boolean(entry.refConflict) || (hasRead && !reader.awaitingLot)}
-        typedLabel={reader.awaitingLot ? 'Código do lote' : 'Código ou REF'} />
+      {invoiceCamera ? (
+        <Typography variant="caption" color="text.secondary">
+          Leitura de itens pausada enquanto você lê a nota.
+        </Typography>
+      ) : (
+        <CodeReader onCode={onCode}
+          busy={reader.reading || newItemOpen || Boolean(entry.refConflict) || (hasRead && !reader.awaitingLot)}
+          typedLabel={reader.awaitingLot ? 'Código do lote' : 'Código ou REF'} />
+      )}
 
       {hasRead && (
         <Paper variant="outlined" sx={{ p: 2 }}>
@@ -126,6 +149,11 @@ export default function EntryMobile({ entry }) {
             {reader.awaitingLot && (
               <Alert severity="info" icon={false} sx={{ fontWeight: 600 }}>
                 Produto lido pelo código de barras. Agora leia o código de barras do LOTE.
+              </Alert>
+            )}
+            {item.invoiceNumber && (
+              <Alert severity="success" icon={false}>
+                REF e validade vieram da nota {item.invoiceNumber}.
               </Alert>
             )}
             {!reader.awaitingLot && item.lot && !item.expiryDate && (
@@ -193,10 +221,15 @@ export default function EntryMobile({ entry }) {
 
       <Box sx={{ position: 'fixed', left: 0, right: 0, bottom: 0, p: 2, zIndex: 10, backgroundColor: tokens.surface,
         borderTop: `1px solid ${tokens.borderLight}`, paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))' }}>
-        <Button variant="contained" fullWidth size="large" onClick={submit} disabled={entry.saving || draft.items.length === 0}
+        <Button variant="contained" fullWidth size="large" onClick={submit} disabled={entry.saving || draft.items.length === 0 || missingInvoice}
           sx={{ minHeight: 48 }}>
           {editing ? 'Salvar correção' : 'Registrar entrada na sala'}
         </Button>
+        {missingInvoice && draft.items.length > 0 && (
+          <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
+            Leia a nota fiscal da caixa para registrar a entrada.
+          </Typography>
+        )}
       </Box>
 
       <ItemDialog open={newItemOpen} item={null} initial={reader.unknown || undefined}
@@ -204,6 +237,8 @@ export default function EntryMobile({ entry }) {
         onSaved={(saved) => { setNewItemOpen(false); reader.applyMaterial(saved); }} />
       <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
         onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
+      <EntryInvoiceDialog summary={entry.invoiceSummary} onClose={() => entry.setInvoiceSummary(null)} />
+
     </Stack>
   );
 }

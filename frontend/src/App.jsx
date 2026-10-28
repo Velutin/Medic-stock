@@ -11,6 +11,7 @@ import StockPage from './pages/stock/StockPage';
 import RegistryPage from './pages/registry/RegistryPage';
 import EntryPage from './pages/entry/EntryPage';
 import TransferPage from './pages/transfer/TransferPage';
+import InvoicesPage from './pages/invoices/InvoicesPage';
 import SurgeryPage from './pages/surgery/SurgeryPage';
 import ReplenishmentPage from './pages/replenishment/ReplenishmentPage';
 import LoanPage from './pages/loan/LoanPage';
@@ -26,6 +27,7 @@ const PAGES = {
   '/cadastros': <RegistryPage />,
   '/entrada': <EntryPage />,
   '/transferencia': <TransferPage />,
+  '/transporte': <InvoicesPage />,
   '/saida': <SurgeryPage />,
   '/reposicao': <ReplenishmentPage />,
   '/emprestimos': <LoanPage />,

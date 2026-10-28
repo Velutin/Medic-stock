@@ -19,6 +19,8 @@ import EntryHistory from './EntryHistory';
 import EntryImportDialog from './EntryImportDialog';
 import ExpiryField from './ExpiryField';
 import LotRefChangeDialog from './LotRefChangeDialog';
+import InvoiceKeysField from './InvoiceKeysField';
+import EntryInvoiceDialog from './EntryInvoiceDialog';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -34,6 +36,12 @@ export default function EntryDesktop({ entry }) {
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const { draft, setField, totals, editing } = entry;
+  /*
+   * Com a nota exigida, a entrada não grava sem pelo menos uma nota lida: a obrigação aparece antes do
+   * trabalho, não depois de ler duzentas etiquetas. Correção de entrada fica de fora — ela mexe em algo já
+   * gravado, e travar agora seria mudar a regra de um lançamento feito sob outra.
+   */
+  const missingInvoice = entry.invoiceRequired && !editing && (draft.invoiceKeys || []).length === 0;
   const { item, errors } = reader;
 
   const readCode = async () => {
@@ -136,6 +144,7 @@ export default function EntryDesktop({ entry }) {
               inputProps={{ max: todayIso() }} />
             <TextField label="Observação" value={draft.notes} onChange={(e) => setField('notes', e.target.value)}
               multiline minRows={3} inputProps={{ maxLength: 1000 }} />
+            <InvoiceKeysField entry={entry} />
             <Box sx={{ p: 1.5, borderRadius: '6px', backgroundColor: tokens.background, fontSize: 13, color: tokens.textMuted }}>
               Os itens entram na sala e ficam reservados ao destino escolhido.
             </Box>
@@ -169,6 +178,11 @@ export default function EntryDesktop({ entry }) {
             </Box>
 
             {item.material && <MaterialLabel material={item.material} />}
+            {item.invoiceNumber && (
+              <Alert severity="success" icon={false}>
+                REF e validade vieram da nota {item.invoiceNumber}. Confira a quantidade e adicione.
+              </Alert>
+            )}
             {reader.unknown && (
               <Alert severity="warning" action={(
                 <Button color="inherit" size="small" onClick={() => setNewItemOpen(true)}>Cadastrar item</Button>
@@ -224,9 +238,14 @@ export default function EntryDesktop({ entry }) {
               <Typography variant="body2" color="text.secondary">
                 {plural(totals.lots, 'lote', 'lotes')} · {plural(totals.units, 'unidade', 'unidades')}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+                {missingInvoice && draft.items.length > 0 && (
+                  <Typography variant="caption" color="warning.main">
+                    Leia a nota fiscal da caixa para registrar a entrada.
+                  </Typography>
+                )}
                 {editing && <Button variant="outlined" onClick={entry.reset}>Cancelar correção</Button>}
-                <Button variant="contained" onClick={submit} disabled={entry.saving || draft.items.length === 0}>
+                <Button variant="contained" onClick={submit} disabled={entry.saving || draft.items.length === 0 || missingInvoice}>
                   {editing ? 'Salvar correção' : 'Registrar entrada na sala'}
                 </Button>
               </Box>
@@ -244,6 +263,8 @@ export default function EntryDesktop({ entry }) {
         onAdd={async (lines) => { if (!(await addLines(lines)).problem) setImportOpen(false); }} />
       <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
         onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
+      <EntryInvoiceDialog summary={entry.invoiceSummary} onClose={() => entry.setInvoiceSummary(null)} />
+
     </>
   );
 }

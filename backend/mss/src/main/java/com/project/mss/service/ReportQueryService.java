@@ -31,6 +31,8 @@ import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.PendingIssue;
 import com.project.mss.model.entity.Stock;
+import com.project.mss.model.entity.StockMovement;
+import com.project.mss.model.entity.SupplierInvoice;
 import com.project.mss.model.entity.Surgery;
 import com.project.mss.model.entity.SurgeryItem;
 import com.project.mss.model.entity.User;
@@ -43,6 +45,8 @@ import com.project.mss.repository.DeliveryRepository;
 import com.project.mss.repository.HospitalRepository;
 import com.project.mss.repository.LoanRepository;
 import com.project.mss.repository.PendingIssueRepository;
+import com.project.mss.repository.SupplierInvoiceRepository;
+import com.project.mss.repository.StockEntryItemInvoiceRepository;
 import com.project.mss.repository.StockMovementRepository;
 import com.project.mss.repository.StockRepository;
 import com.project.mss.repository.SurgeryRepository;
@@ -69,13 +73,17 @@ public class ReportQueryService {
     private final HospitalRepository hospitalRepository;
     private final UserRepository userRepository;
     private final AccessControlService accessControlService;
+    private final SupplierInvoiceRepository supplierInvoiceRepository;
+    private final StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository;
     private final PdfService pdfService;
 
     public ReportQueryService(SurgeryRepository surgeryRepository, PendingIssueRepository pendingIssueRepository,
                               DeliveryRepository deliveryRepository, LoanRepository loanRepository,
                               StockMovementRepository stockMovementRepository, StockRepository stockRepository,
                               HospitalRepository hospitalRepository, UserRepository userRepository,
-                              AccessControlService accessControlService, PdfService pdfService) {
+                              AccessControlService accessControlService, PdfService pdfService,
+                              SupplierInvoiceRepository supplierInvoiceRepository,
+                              StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository) {
         this.surgeryRepository = surgeryRepository;
         this.pendingIssueRepository = pendingIssueRepository;
         this.deliveryRepository = deliveryRepository;
@@ -86,6 +94,8 @@ public class ReportQueryService {
         this.userRepository = userRepository;
         this.accessControlService = accessControlService;
         this.pdfService = pdfService;
+        this.supplierInvoiceRepository = supplierInvoiceRepository;
+        this.stockEntryItemInvoiceRepository = stockEntryItemInvoiceRepository;
     }
 
     /** Inclusive period; both dates are required by the screen, the defaults only protect direct calls. */
@@ -211,16 +221,20 @@ public class ReportQueryService {
     @Transactional(readOnly = true)
     public byte[] pendingIssuesPdf(LocalDate start, LocalDate end, Long hospitalId, PendingIssueStatus status) {
         List<PendingIssueReportDTO> list = pendingIssues(start, end, hospitalId, status);
-        List<String[]> rows = list.stream().map(i -> new String[]{i.surgeryDate().format(DATE), i.hospital(),
+        List<String[]> rows = list.stream().map(i -> new String[]{i.date().format(DATE),
+                i.surgeryId() != null ? "Cirurgia" : "Entrada" + (i.entryId() != null ? " #" + i.entryId() : ""),
+                i.hospital(),
                 i.enteredCode() + (i.enteredRef() != null ? " (REF " + i.enteredRef() + ")" : ""), reasonLabel(i.reason().name()),
                 nvl(i.createdBy()), statusLabel(i.status()) + (i.resolution() != null ? ": " + i.resolution() : "")}).toList();
         return summary("PENDÊNCIAS", Period.of(start, end).label() + " · " + hospitalLabel(hospitalId)
                         + (status == null ? "" : " · " + statusLabel(status)),
                 List.of(h(list.size(), "pendências"), h(count(list, PendingIssueStatus.OPEN), "em aberto"),
                         h(count(list, PendingIssueStatus.RESOLVED), "resolvidas"), h(count(list, PendingIssueStatus.DISCARDED), "descartadas")),
-                List.of(table(null, null, null, new String[]{"DATA", "HOSPITAL", "ITEM LIDO", "PENDÊNCIA", "LANÇADO POR", "SITUAÇÃO"},
-                        new float[]{0.9f, 1.5f, 1.8f, 1.5f, 1.2f, 2f}, new int[]{}, rows, null)),
-                "Itens lidos na saída em cirurgia que não puderam ser lançados direto no estoque do hospital.");
+                List.of(table(null, null, null,
+                        new String[]{"DATA", "ORIGEM", "HOSPITAL", "ITEM", "PENDÊNCIA", "LANÇADO POR", "SITUAÇÃO"},
+                        new float[]{0.9f, 1f, 1.4f, 1.7f, 1.4f, 1.1f, 1.9f}, new int[]{}, rows, null)),
+                "Itens que não puderam ser lançados direto: lidos na saída em cirurgia, ou recebidos na entrada "
+                        + "sem uma nota que os estivesse devendo.");
     }
 
     // ============================================================ deliveries
@@ -362,21 +376,37 @@ public class ReportQueryService {
     // ============================================================ loans and returns
 
     @Transactional(readOnly = true)
-    public List<LoanDTO> loans(LoanType type, LocalDate start, LocalDate end, Long hospitalId) {
+    /**
+     * Loans or returns of the period; with a lot, its whole history instead.
+     *
+     * Searching by lot drops the period and the hospital for the same reason as in the movements report: the
+     * question is where that lot went, and it went wherever it went. The loan is answered whole - knowing it
+     * moved is only useful together with what went with it.
+     */
+    public List<LoanDTO> loans(LoanType type, LocalDate start, LocalDate end, Long hospitalId, String lot) {
         accessControlService.requireManager();
-        Period p = Period.of(start, end);
-        Set<Long> allowed = hospitals(hospitalId);
+        boolean byLot = lot != null && !lot.isBlank();
+        Period p = byLot ? Period.of(LocalDate.of(2000, 1, 1), LocalDate.now()) : Period.of(start, end);
+        Set<Long> allowed = byLot ? allHospitals() : hospitals(hospitalId);
+        String wanted = byLot ? comparableLot(searchableLot(lot)) : null;
         return loanRepository.listForReport(type, p.from(), p.to()).stream()
                 .filter(e -> allowed.contains(e.getSourceHospital().getId())
                         || (e.getDestinationHospital() != null && allowed.contains(e.getDestinationHospital().getId())))
                 .map(LoanDTO::of)
+                .filter(l -> wanted == null || l.items().stream()
+                        .anyMatch(i -> comparableLot(i.lot()).startsWith(wanted)))
                 .toList();
     }
 
+    /** Lot number as lots are compared across the system: upper case, without leading zeros. */
+    private static String comparableLot(String number) {
+        return com.project.mss.model.entity.Lot.comparableNumber(number);
+    }
+
     @Transactional(readOnly = true)
-    public byte[] loansPdf(LoanType type, LocalDate start, LocalDate end, Long hospitalId) {
+    public byte[] loansPdf(LoanType type, LocalDate start, LocalDate end, Long hospitalId, String lot) {
         boolean returns = type == LoanType.RETURN;
-        List<LoanDTO> list = loans(type, start, end, hospitalId);
+        List<LoanDTO> list = loans(type, start, end, hospitalId, lot);
         List<PdfService.Section> sections = new ArrayList<>();
         int units = 0;
         java.util.Set<String> lots = new java.util.HashSet<>();
@@ -396,7 +426,9 @@ public class ReportQueryService {
                     headingNote, new String[]{"REF", "MATERIAL", "LOTE", "VALIDADE", "QTD."}, new float[]{1.3f, 2.6f, 1.1f, 1f, 0.5f},
                     new int[]{4}, rows, null));
         }
-        return summary(returns ? "DEVOLUÇÕES À BAUMER" : "EMPRÉSTIMOS", Period.of(start, end).label() + " · " + hospitalLabel(hospitalId),
+        return summary(returns ? "DEVOLUÇÕES À BAUMER" : "EMPRÉSTIMOS",
+                lot != null && !lot.isBlank() ? "Lote " + lot.trim().toUpperCase() + " · todo o período"
+                        : Period.of(start, end).label() + " · " + hospitalLabel(hospitalId),
                 List.of(h(list.size(), returns ? "devoluções" : "empréstimos"), h(units, "peças"), h(lots.size(), "lotes diferentes")),
                 sections.isEmpty() ? List.of(table(null, null, null, new String[]{"REF", "MATERIAL", "LOTE", "VALIDADE", "QTD."},
                         new float[]{1.3f, 2.6f, 1.1f, 1f, 0.5f}, new int[]{4}, List.of(), null)) : sections,
@@ -405,31 +437,122 @@ public class ReportQueryService {
 
     // ============================================================ movements
 
+    /**
+     * Movements for the report.
+     *
+     * With a lot or an invoice, the period is ignored: "where did this lot go" is a question without a date,
+     * and asking the user to guess the right period to find a receipt from eight months ago is asking them
+     * to not find it. The hospital filter is dropped as well, because a lot passes through more than one.
+     *
+     * An invoice is given by number, which is what is printed on the paper. It resolves to the lots that
+     * invoice brought in - the system tracks lots, not units, so a lot that also came in another invoice
+     * brings the movements of both; the screen says so rather than implying a precision that is not there.
+     */
     @Transactional(readOnly = true)
-    public List<StockMovementDTO> movements(LocalDate start, LocalDate end, Long hospitalId, MovementType type) {
+    public List<StockMovementDTO> movements(LocalDate start, LocalDate end, Long hospitalId, MovementType type,
+                                            String lot, String invoiceNumber, Long invoiceId) {
         accessControlService.requireManager();
-        Period p = Period.of(start, end);
-        return stockMovementRepository.listForReport(hospitals(hospitalId), p.from(), p.to(), PageRequest.of(0, MAX_MOVEMENTS))
-                .stream()
+        boolean byLot = lot != null && !lot.isBlank();
+        List<Long> lotIds = invoiceLots(invoiceNumber, invoiceId);
+        boolean byInvoice = lotIds != null;
+
+        Period p = byLot || byInvoice ? Period.of(LocalDate.of(2000, 1, 1), LocalDate.now()) : Period.of(start, end);
+        Set<Long> scope = byLot || byInvoice ? allHospitals() : hospitals(hospitalId);
+        // Empty, not null: the query compares it inside TRIM, and a null parameter there has no type
+        String wantedLot = byLot ? searchableLot(lot) : "";
+        PageRequest cap = PageRequest.of(0, MAX_MOVEMENTS);
+
+        // An invoice whose lots are not in the stock history yet filters everything out, which is the honest
+        // answer: nothing of it has moved
+        List<StockMovement> found = byInvoice
+                ? (lotIds.isEmpty() ? List.of()
+                        : stockMovementRepository.listForReportInLots(scope, p.from(), p.to(), wantedLot, lotIds, cap))
+                : stockMovementRepository.listForReport(scope, p.from(), p.to(), wantedLot, cap);
+
+        List<StockMovementDTO> rows = found.stream()
                 .filter(m -> type == null || m.getType() == type)
                 .map(StockMovementDTO::of)
                 .toList();
+        return withInvoices(rows);
+    }
+
+    /** Lots of the invoices with this number (or of one invoice by id); null when no invoice was asked for. */
+    private List<Long> invoiceLots(String invoiceNumber, Long invoiceId) {
+        List<Long> invoiceIds = new ArrayList<>();
+        if (invoiceId != null) {
+            invoiceIds.add(invoiceId);
+        } else if (invoiceNumber != null && !invoiceNumber.isBlank()) {
+            // The same number may exist at two suppliers; both are brought, and the Nota column tells them apart.
+            // Typed as it is on the paper first, then without leading zeros, so 0242466 also finds 242466
+            String typed = invoiceNumber.trim();
+            supplierInvoiceRepository.findByNumber(typed).forEach(i -> invoiceIds.add(i.getId()));
+            String withoutZeros = typed.replaceFirst("^0+", "");
+            if (invoiceIds.isEmpty() && !withoutZeros.equals(typed) && !withoutZeros.isBlank()) {
+                supplierInvoiceRepository.findByNumber(withoutZeros).forEach(i -> invoiceIds.add(i.getId()));
+            }
+            if (invoiceIds.isEmpty()) return List.of();
+        } else {
+            return null;
+        }
+        return stockEntryItemInvoiceRepository.lotIdsOfInvoices(invoiceIds);
+    }
+
+    /** Names the invoices of each entry row, in one query for the whole page. */
+    private List<StockMovementDTO> withInvoices(List<StockMovementDTO> rows) {
+        Set<Long> entryIds = rows.stream().map(StockMovementDTO::stockEntryId)
+                .filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        if (entryIds.isEmpty()) return rows;
+
+        Map<Long, java.util.LinkedHashSet<String>> byEntry = new java.util.HashMap<>();
+        for (Object[] row : stockEntryItemInvoiceRepository.invoicesOfEntries(entryIds)) {
+            byEntry.computeIfAbsent((Long) row[0], k -> new java.util.LinkedHashSet<>()).add((String) row[1]);
+        }
+        return rows.stream().map(r -> {
+            java.util.LinkedHashSet<String> numbers = r.stockEntryId() == null ? null : byEntry.get(r.stockEntryId());
+            return numbers == null || numbers.isEmpty() ? r : r.withInvoice(String.join(", ", numbers));
+        }).toList();
+    }
+
+    /** Lot as typed, without a trailing letter: 5655208B and 5655208 are the same lot. */
+    private static String searchableLot(String lot) {
+        // % and _ are wildcards of the LIKE below: typed by hand they would widen the search silently
+        String clean = lot.trim().toUpperCase().replace("%", "").replace("_", "");
+        String typed = clean.replaceAll("[A-Z]+$", "");
+        return typed.isBlank() ? clean : typed;
+    }
+
+    /** The invoice as the PDF heading names it: the typed number, or the number of the invoice pointed at. */
+    private String invoiceLabel(String invoiceNumber, Long invoiceId) {
+        if (invoiceNumber != null && !invoiceNumber.isBlank()) return invoiceNumber.trim();
+        if (invoiceId == null) return "—";
+        return supplierInvoiceRepository.findById(invoiceId).map(SupplierInvoice::getNumber).orElse("—");
+    }
+
+    private Set<Long> allHospitals() {
+        return accessControlService.allowedHospitals();
     }
 
     @Transactional(readOnly = true)
-    public byte[] movementsPdf(LocalDate start, LocalDate end, Long hospitalId, MovementType type) {
-        List<StockMovementDTO> list = movements(start, end, hospitalId, type);
+    public byte[] movementsPdf(LocalDate start, LocalDate end, Long hospitalId, MovementType type,
+                               String lot, String invoiceNumber, Long invoiceId) {
+        List<StockMovementDTO> list = movements(start, end, hospitalId, type, lot, invoiceNumber, invoiceId);
+        boolean searching = (lot != null && !lot.isBlank()) || (invoiceNumber != null && !invoiceNumber.isBlank())
+                || invoiceId != null;
         List<String[]> rows = list.stream().map(m -> new String[]{
                 m.date().format(DATE_TIME), movementLabel(m.type()), m.ref() + " · " + m.lot(), String.valueOf(m.quantity()),
                 place(m.sourceHospital(), m.sourceLocation()), place(m.destinationHospital(), m.destinationLocation()),
-                nvl(m.user())}).toList();
-        return summary("MOVIMENTAÇÕES", Period.of(start, end).label() + " · " + hospitalLabel(hospitalId)
+                nvl(m.invoice()), nvl(m.user())}).toList();
+        return summary("MOVIMENTAÇÕES", (searching
+                        ? (lot != null && !lot.isBlank() ? "Lote " + lot.trim().toUpperCase()
+                            : "Nota " + invoiceLabel(invoiceNumber, invoiceId))
+                            + " · todo o período"
+                        : Period.of(start, end).label() + " · " + hospitalLabel(hospitalId))
                         + " · " + (type == null ? "todos os tipos" : movementLabel(type)),
                 List.of(h(list.size(), "movimentações"), h(countType(list, MovementType.ENTRY), "entradas"),
                         h(countType(list, MovementType.REPLENISHMENT), "transferências"),
                         h(countType(list, MovementType.SURGERY_WITHDRAWAL), "saídas em cirurgia")),
-                List.of(table(null, null, null, new String[]{"DATA", "TIPO", "REF · LOTE", "QTD.", "ORIGEM", "DESTINO", "USUÁRIO"},
-                        new float[]{1.2f, 1.3f, 1.8f, 0.5f, 1.6f, 1.6f, 1.1f}, new int[]{3}, rows, null)),
+                List.of(table(null, null, null, new String[]{"DATA", "TIPO", "REF · LOTE", "QTD.", "ORIGEM", "DESTINO", "NOTA", "USUÁRIO"},
+                        new float[]{1.2f, 1.3f, 1.7f, 0.5f, 1.4f, 1.4f, 0.9f, 1f}, new int[]{3}, rows, null)),
                 list.size() >= MAX_MOVEMENTS ? "Mostrando as " + MAX_MOVEMENTS + " mais recentes: reduza o período para ver todas." : null);
     }
 
@@ -465,11 +588,18 @@ public class ReportQueryService {
         return list.stream().filter(m -> m.type() == type).count();
     }
 
+    /** One line of the report, from a surgery withdrawal or from an entry that had no invoice behind it. */
     private static PendingIssueReportDTO pendingRow(PendingIssue i) {
         Surgery c = i.getSurgery();
-        return new PendingIssueReportDTO(i.getId(), c.getId(), c.getSurgeryDate(), c.getPatientName(), i.getHospital().getId(),
-                i.getHospital().getName(), i.getEnteredCode(), i.getEnteredRef(), i.getQuantity(), i.getReason(),
-                name(c.getCreatedBy()), i.getStatus(), i.getResolution(), name(i.getResolvedBy()), i.getCreatedAt());
+        Long entryId = i.getStockEntryItem() != null ? i.getStockEntryItem().getStockEntry().getId() : null;
+        // The date the report sorts by: the surgery's when there is one, the day it was raised otherwise
+        LocalDate date = c != null ? c.getSurgeryDate() : i.getCreatedAt().toLocalDate();
+        return new PendingIssueReportDTO(i.getId(), c != null ? c.getId() : null,
+                c != null ? c.getSurgeryDate() : null, c != null ? c.getPatientName() : null,
+                i.getHospital().getId(), i.getHospital().getName(), i.getEnteredCode(), i.getEnteredRef(),
+                i.getQuantity(), i.getReason(), c != null ? name(c.getCreatedBy()) : null, i.getStatus(),
+                i.getResolution(), name(i.getResolvedBy()), entryId, i.getDeclaredInvoice(), date,
+                i.getCreatedAt());
     }
 
     private static int units(Surgery c) {
@@ -511,6 +641,7 @@ public class ReportQueryService {
             case "AMBIGUOUS_LOT" -> "Lote com mais de uma validade";
             case "EXPIRED_LOT" -> "Lote vencido";
             case "NO_HOSPITAL_BALANCE" -> "Sem saldo no hospital";
+            case "WITHOUT_INVOICE" -> "Entrou sem nota";
             default -> reason;
         };
     }

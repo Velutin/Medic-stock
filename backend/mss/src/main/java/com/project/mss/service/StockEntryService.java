@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.project.mss.dto.entry.EntryDTO;
 import com.project.mss.dto.entry.EntryFormDTO;
+import com.project.mss.dto.entry.EntryInvoiceSummaryDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Hospital;
@@ -72,11 +73,13 @@ public class StockEntryService {
     private final AccessControlService accessControlService;
     private final LotRepository lotRepository;
     private final LotRefChangeService lotRefChangeService;
+    private final EntryInvoiceLinkService invoiceLinkService;
 
     public StockEntryService(StockEntryRepository stockEntryRepository, HospitalRepository hospitalRepository,
                              MaterialRepository materialRepository, MaterialService materialService,
                              StockService stockService, AccessControlService accessControlService,
-                             LotRepository lotRepository, LotRefChangeService lotRefChangeService) {
+                             LotRepository lotRepository, LotRefChangeService lotRefChangeService,
+                             EntryInvoiceLinkService invoiceLinkService) {
         this.stockEntryRepository = stockEntryRepository;
         this.hospitalRepository = hospitalRepository;
         this.materialRepository = materialRepository;
@@ -85,6 +88,7 @@ public class StockEntryService {
         this.accessControlService = accessControlService;
         this.lotRepository = lotRepository;
         this.lotRefChangeService = lotRefChangeService;
+        this.invoiceLinkService = invoiceLinkService;
     }
 
     @Transactional
@@ -106,7 +110,11 @@ public class StockEntryService {
             stockService.recordStockEntry(item.lot(), item.quantity(), destination, entry.getId(), movementDate);
             entry.getItems().add(new StockEntryItem(entry, item.lot(), item.quantity()));
         }
-        return EntryDTO.of(stockEntryRepository.save(entry));
+        StockEntry saved = stockEntryRepository.save(entry);
+        // What was received is written against the invoices that announced it, and the answer travels back
+        // with the entry: having just unpacked the box is the moment to learn what is still missing
+        EntryInvoiceSummaryDTO invoices = invoiceLinkService.link(saved, dto.invoiceKeys());
+        return EntryDTO.of(saved).withInvoices(invoices);
     }
 
     /** Replaces the content of the entry, applying only the balance differences to the storerooms. */
@@ -167,7 +175,14 @@ public class StockEntryService {
         entry.setNotes(blankToNull(dto.notes()));
         entry.setUpdatedBy(accessControlService.currentUser());
         entry.setUpdatedAt(LocalDateTime.now());
-        return EntryDTO.of(stockEntryRepository.save(entry));
+        StockEntry saved = stockEntryRepository.save(entry);
+
+        // A correction changes which lots were received, so the old links no longer describe anything: they
+        // are given back to the invoices and written again over the new content. Keeping them would leave an
+        // invoice reporting as received a lot the entry no longer has.
+        invoiceLinkService.unlink(saved.getId());
+        EntryInvoiceSummaryDTO invoices = invoiceLinkService.link(saved, dto.invoiceKeys());
+        return EntryDTO.of(saved).withInvoices(invoices);
     }
 
     /** Entries in a period (default: everything until today), newest first. */
@@ -187,7 +202,8 @@ public class StockEntryService {
     @Transactional(readOnly = true)
     public EntryDTO find(Long id) {
         accessControlService.requireManager();
-        return EntryDTO.of(load(id));
+        StockEntry entry = load(id);
+        return EntryDTO.of(entry).withInvoices(invoiceLinkService.ofEntry(entry.getId()));
     }
 
     // ============================================================ helpers

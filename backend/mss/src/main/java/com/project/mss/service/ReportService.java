@@ -10,6 +10,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -40,6 +41,7 @@ import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.SupplierOrder;
 import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.SurgeryStatus;
+import com.project.mss.repository.StockEntryItemInvoiceRepository;
 import com.project.mss.repository.SurgeryRepository;
 
 @Service
@@ -54,17 +56,21 @@ public class ReportService {
     private final LoanService loanService;
     private final StockService stockService;
     private final SurgeryRepository surgeryRepository;
+    private final StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository;
     private final AccessControlService accessControlService;
 
     public ReportService(PdfService pdfService, DeliveryService deliveryService,
                             SupplierOrderService supplierOrderService, LoanService loanService, StockService stockService,
-                            SurgeryRepository surgeryRepository, AccessControlService accessControlService) {
+                            SurgeryRepository surgeryRepository,
+                            StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository,
+                            AccessControlService accessControlService) {
         this.pdfService = pdfService;
         this.deliveryService = deliveryService;
         this.supplierOrderService = supplierOrderService;
         this.loanService = loanService;
         this.stockService = stockService;
         this.surgeryRepository = surgeryRepository;
+        this.stockEntryItemInvoiceRepository = stockEntryItemInvoiceRepository;
         this.accessControlService = accessControlService;
     }
 
@@ -207,15 +213,44 @@ public class ReportService {
 
     // ============================================================ stock spreadsheet
 
+    /**
+     * Origin invoices of each lot, for the last column of the stock spreadsheets.
+     *
+     * This is the column that answers, months later, which invoice brought material that is no longer on
+     * the shelf: the file keeps it even after the lot is gone. It is empty for everything that entered
+     * before the invoices started being read, and for what entered without a note - an empty cell says
+     * exactly that, instead of guessing an origin.
+     */
+    private Map<Long, String> invoicesByLot(List<Long> lotIds) {
+        if (lotIds.isEmpty()) return Map.of();
+        Map<Long, LinkedHashSet<String>> numbers = new HashMap<>();
+        // In chunks: a whole-hospital export is thousands of lots, more than one IN list should carry
+        for (int from = 0; from < lotIds.size(); from += INVOICE_LOOKUP_CHUNK) {
+            List<Long> chunk = lotIds.subList(from, Math.min(from + INVOICE_LOOKUP_CHUNK, lotIds.size()));
+            for (Object[] row : stockEntryItemInvoiceRepository.invoiceNumbersOfLots(chunk)) {
+                numbers.computeIfAbsent((Long) row[0], k -> new LinkedHashSet<>()).add((String) row[1]);
+            }
+        }
+        Map<Long, String> byLot = new HashMap<>();
+        numbers.forEach((lotId, invoices) -> byLot.put(lotId, String.join(", ", invoices)));
+        return byLot;
+    }
+
+    private static final int INVOICE_LOOKUP_CHUNK = 500;
+
     /** Hospital stock as Excel, with the size identification color on each row. */
     @Transactional(readOnly = true)
     public byte[] stockSpreadsheet(Long hospitalId) {
         Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
         List<StockRowDTO> rows = stockService.hospitalView(hospitalId, false);
+        // The first nine columns keep the layout of the spreadsheet this export replaces, and the sheet keeps
+        // its name, so the formulas pointing at them still work; the invoice column comes after them
+        Map<Long, String> invoices = invoicesByLot(rows.stream().map(StockRowDTO::lotId).filter(java.util.Objects::nonNull).distinct().toList());
 
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             XSSFSheet sh = wb.createSheet("Estoque");
-            String[] header = {"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital", "Na sala", "Total"};
+            String[] header = {"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital", "Na sala",
+                               "Total", "Notas de origem"};
 
             XSSFFont bold = wb.createFont();
             bold.setBold(true);
@@ -246,7 +281,8 @@ public class ReportService {
                 Row row = sh.createRow(n++);
                 Object[] v = {l.ref(), l.description(), l.component(), l.size(), l.lot(),
                         l.expiryDate().format(DATE),
-                        l.hospitalQuantity(), l.storeroomQuantity(), l.hospitalQuantity() + l.storeroomQuantity()};
+                        l.hospitalQuantity(), l.storeroomQuantity(), l.hospitalQuantity() + l.storeroomQuantity(),
+                        invoices.getOrDefault(l.lotId(), "")};
                 for (int i = 0; i < v.length; i++) {
                     var cell = row.createCell(i);
                     if (v[i] instanceof Integer num) cell.setCellValue(num);
@@ -280,6 +316,7 @@ public class ReportService {
         List<LotStockDTO> rows = page.getContent();
         String place = hospitalId == null ? (storeroom ? "Todas as salas" : "Todos os hospitais")
                 : accessControlService.requireHospitalAccess(hospitalId).getName();
+        Map<Long, String> invoices = invoicesByLot(rows.stream().map(LotStockDTO::lotId).filter(java.util.Objects::nonNull).distinct().toList());
 
         /*
          * The storeroom columns only exist for an administrator. For a read-only user the search already
@@ -292,13 +329,13 @@ public class ReportService {
         String[] header;
         if (storeroom) {
             header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "Na sala",
-                                  "Situação", "Dias para vencer", "Sala"};
+                                  "Situação", "Dias para vencer", "Sala", "Notas de origem"};
         } else if (withStoreroom) {
             header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
-                                  "Na sala", "Total", "Situação", "Dias para vencer", "Hospital"};
+                                  "Na sala", "Total", "Situação", "Dias para vencer", "Hospital", "Notas de origem"};
         } else {
             header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
-                                  "Situação", "Dias para vencer", "Hospital"};
+                                  "Situação", "Dias para vencer", "Hospital", "Notas de origem"};
         }
 
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -341,17 +378,21 @@ public class ReportService {
             for (LotStockDTO l : rows) {
                 long daysLeft = ChronoUnit.DAYS.between(today, l.expiryDate());
                 String status = daysLeft < 0 ? "Vencido" : daysLeft <= 30 ? "Vence em até 30 dias" : "Válido";
+                String origin = invoices.getOrDefault(l.lotId(), "");
                 Object[] v;
                 if (storeroom) {
                     v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
-                                     l.expiryDate().format(DATE), l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                                     l.expiryDate().format(DATE), l.storeroomQuantity(), status, daysLeft,
+                                     l.hospital(), origin};
                 } else if (withStoreroom) {
                     v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
                                      l.expiryDate().format(DATE), l.hospitalQuantity(), l.storeroomQuantity(),
-                                     l.hospitalQuantity() + l.storeroomQuantity(), status, daysLeft, l.hospital()};
+                                     l.hospitalQuantity() + l.storeroomQuantity(), status, daysLeft,
+                                     l.hospital(), origin};
                 } else {
                     v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
-                                     l.expiryDate().format(DATE), l.hospitalQuantity(), status, daysLeft, l.hospital()};
+                                     l.expiryDate().format(DATE), l.hospitalQuantity(), status, daysLeft,
+                                     l.hospital(), origin};
                 }
                 XSSFCellStyle style = l.color() == null ? defaultStyle
                         : stylesByColor.computeIfAbsent(l.color(), color -> colorStyle(wb, color));

@@ -6,8 +6,9 @@ import BarcodeScanner from './BarcodeScanner';
 /**
  * Camera reader with a typed fallback ("Câmera não leu? Digitar código"), for the phone screens.
  * onCode(text) receives what was read or typed; busy pauses the camera while a reading is processed.
+ * wide draws (and decodes) a long, low aim, for the barcode of an invoice instead of a label of material.
  */
-export default function CodeReader({ onCode, busy, typedLabel = 'Código, REF ou lote' }) {
+export default function CodeReader({ onCode, busy, wide = false, typedLabel = 'Código, REF ou lote' }) {
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState('');
 
@@ -21,7 +22,7 @@ export default function CodeReader({ onCode, busy, typedLabel = 'Código, REF ou
 
   return (
     <Stack spacing={1.5}>
-      <BarcodeScanner onCode={onCode} paused={busy} />
+      <BarcodeScanner onCode={onCode} paused={busy} wide={wide} />
       {typing ? (
         <Box component="form" onSubmit={submit} sx={{ display: 'flex', gap: 1 }}>
           <TextField label={typedLabel} value={text} onChange={(e) => setText(e.target.value)} autoFocus fullWidth

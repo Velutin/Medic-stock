@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../api/client';
 import useHospitals from '../../hooks/useHospitals';
 import { daysUntil, formatDate } from '../../utils/format';
@@ -7,7 +7,7 @@ import { sameLot } from '../../utils/lot';
 /** Today in the local time zone, as yyyy-mm-dd. */
 export const todayIso = () => new Date().toLocaleDateString('sv-SE');
 
-const emptyDraft = () => ({ hospitalId: '', entryDate: todayIso(), notes: '', items: [] });
+const emptyDraft = () => ({ hospitalId: '', entryDate: todayIso(), notes: '', items: [], invoiceKeys: [] });
 let nextKey = 1;
 
 /**
@@ -52,6 +52,21 @@ export default function useEntryDraft() {
   const [saving, setSaving] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
   const [refConflict, setRefConflict] = useState(null);
+  // O que as notas ainda devem, respondido ao salvar: é a conferência da caixa recém-aberta
+  const [invoiceSummary, setInvoiceSummary] = useState(null);
+  /*
+   * Com a nota exigida, a entrada só grava com pelo menos uma nota lida, e o vínculo passa a valer só para
+   * as notas lidas. A exigência é lida uma vez ao abrir a tela; se a leitura falhar ela fica desligada, que
+   * é o lado seguro: nunca travar uma entrada por causa de uma configuração que não foi possível consultar.
+   */
+  const [invoiceRequired, setInvoiceRequired] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api('/invoices/settings')
+      .then((s) => { if (alive) setInvoiceRequired(s?.['invoice.required.on.entry'] === 'true'); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const setField = useCallback((field, value) => setDraft((d) => ({ ...d, [field]: value })), []);
 
@@ -125,6 +140,27 @@ export default function useEntryDraft() {
 
   const removeItem = useCallback((key) => setDraft((d) => ({ ...d, items: d.items.filter((i) => i.key !== key) })), []);
 
+  /**
+   * Chave de acesso da NF-e lida do código de barras do DANFE: 44 dígitos cujo último confere os outros 43.
+   * Ela não restringe o que pode entrar — a caixa costuma trazer item de nota que ninguém leu —, só diz ao
+   * sistema qual nota está na mão e faz a conferência final falar dela mesmo que nada dela tenha sido lido.
+   */
+  const addInvoiceKey = useCallback((value) => {
+    const digits = (value || '').replace(/\D/g, '');
+    if (digits.length !== 44) return { problem: 'A chave da nota tem 44 dígitos. Leia o código de barras do DANFE.' };
+    if (!validAccessKey(digits)) return { problem: 'Chave inválida: confira a leitura do código de barras.' };
+    let repeated = false;
+    setDraft((d) => {
+      if (d.invoiceKeys.includes(digits)) { repeated = true; return d; }
+      return { ...d, invoiceKeys: [...d.invoiceKeys, digits] };
+    });
+    return repeated ? { problem: 'Esta nota já está nesta entrada.' } : { added: digits };
+  }, []);
+
+  const removeInvoiceKey = useCallback((keyValue) => setDraft(
+    (d) => ({ ...d, invoiceKeys: d.invoiceKeys.filter((k) => k !== keyValue) }),
+  ), []);
+
   const totals = useMemo(() => ({
     lots: draft.items.length,
     units: draft.items.reduce((sum, i) => sum + i.quantity, 0),
@@ -167,6 +203,7 @@ export default function useEntryDraft() {
       items: draft.items.map(({ materialId, lot, expiryDate, quantity, monthOnly, changeRef }) => ({
         materialId, lot, expiryDate, quantity, monthOnly: Boolean(monthOnly), changeRef: Boolean(changeRef),
       })),
+      invoiceKeys: draft.invoiceKeys,
     };
     setSaving(true);
     try {
@@ -175,6 +212,8 @@ export default function useEntryDraft() {
         : await api('/stock-entries', { method: 'POST', body });
       reset();
       setHistoryKey((k) => k + 1);
+      // Mostrado logo depois de gravar: nota por nota, o que ainda falta chegar
+      if (saved.invoices && !isEmptySummary(saved.invoices)) setInvoiceSummary(saved.invoices);
       return saved;
     } finally {
       setSaving(false);
@@ -183,7 +222,35 @@ export default function useEntryDraft() {
 
   return {
     destinations, loadingHospitals, draft, setField, addItem, requestAdd, refConflict, confirmRefChange, cancelRefChange,
-    removeItem, totals,
+    removeItem, totals, addInvoiceKey, removeInvoiceKey,
+    invoiceSummary, setInvoiceSummary, invoiceRequired,
     editing, startEdit, reset, headerError, save, saving, historyKey,
   };
+}
+
+/**
+ * O diálogo só abre quando há algo que valha parar a pessoa.
+ *
+ * Lote sem nota, sozinho, não é motivo: enquanto as notas não alcançam o estoque todo lote é um desses, e um
+ * aviso que aparece depois de toda entrada é um aviso que se aprende a fechar sem ler. Ele volta a importar
+ * quando alguma nota participou (aí a contagem diz o que faltou) ou quando virou pendência.
+ */
+const isEmptySummary = (s) => !s.invoices?.length && !s.instrumentsAwaiting?.length && !s.pendingIssues;
+
+/**
+ * Dígito verificador da chave de acesso: módulo 11 sobre os 43 primeiros dígitos, pesos 2 a 9 da direita
+ * para a esquerda. É o que torna seguro ler o código de barras: um dígito lido errado reprova aqui em vez
+ * de apontar para outra nota.
+ */
+export function validAccessKey(digits) {
+  if (!/^\d{44}$/.test(digits)) return false;
+  let sum = 0;
+  let weight = 2;
+  for (let i = 42; i >= 0; i -= 1) {
+    sum += Number(digits[i]) * weight;
+    weight = weight === 9 ? 2 : weight + 1;
+  }
+  const rest = sum % 11;
+  const expected = rest === 0 || rest === 1 ? 0 : 11 - rest;
+  return expected === Number(digits[43]);
 }

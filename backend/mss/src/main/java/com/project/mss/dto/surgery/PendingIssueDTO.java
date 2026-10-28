@@ -9,11 +9,13 @@ import com.project.mss.model.enums.PendingIssueStatus;
 
 public record PendingIssueDTO(Long id, Long surgeryId, Long hospitalId, String hospital, String enteredCode,
                            String enteredRef, int quantity, ReadSource readSource,
-                           PendingIssueReason reason, PendingIssueStatus status, String resolution, LocalDateTime createdAt) {
+                           PendingIssueReason reason, PendingIssueStatus status, String resolution,
+                           Long entryId, String declaredInvoice, LocalDateTime createdAt) {
     public static PendingIssueDTO of(PendingIssue p) {
         return new PendingIssueDTO(p.getId(), p.getSurgery() != null ? p.getSurgery().getId() : null,
                 p.getHospital().getId(), p.getHospital().getName(), p.getEnteredCode(), p.getEnteredRef(),
                 p.getQuantity(), p.getReadSource(), p.getReason(), p.getStatus(), p.getResolution(),
-                p.getCreatedAt());
+                p.getStockEntryItem() != null ? p.getStockEntryItem().getStockEntry().getId() : null,
+                p.getDeclaredInvoice(), p.getCreatedAt());
     }
 }

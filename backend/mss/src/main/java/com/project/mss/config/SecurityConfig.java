@@ -47,6 +47,9 @@ public class SecurityConfig {
                     .requestMatchers("/imports/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**", "/hospitals/*/prices/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/reports/**", "/billing/**", "/billing-rates/**", "/dashboard/**").hasAnyAuthority("ADMIN", "MASTER")
+                    // Invoices announce material on its way: administrative information, closed at the backend
+                    // and not only hidden on the screen
+                    .requestMatchers("/invoices/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PATCH, "/pending-issues/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/stock/entry", "/stock/adjustment").hasAnyAuthority("ADMIN", "MASTER")
 

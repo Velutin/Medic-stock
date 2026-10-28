@@ -120,29 +120,43 @@ public class ReportController {
     }
 
     @GetMapping("/loans")
-    @Operation(summary = "Loans (type=LOAN) or returns to the supplier (type=RETURN) in the period (ADMIN)")
+    @Operation(summary = "Loans (type=LOAN) or returns to the supplier (type=RETURN) in the period (ADMIN)",
+               description = "With lot, the period and the hospital are ignored: the answer is the whole "
+                       + "history of that lot, wherever it went.")
     public List<LoanDTO> loans(@RequestParam(defaultValue = "LOAN") LoanType type, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-                               @RequestParam(required = false) Long hospitalId) {
-        return reportQueryService.loans(type, start, end, hospitalId);
+                               @RequestParam(required = false) Long hospitalId, @RequestParam(required = false) String lot) {
+        return reportQueryService.loans(type, start, end, hospitalId, lot);
     }
 
     @GetMapping("/loans/pdf")
     public ResponseEntity<byte[]> loansPdf(@RequestParam(defaultValue = "LOAN") LoanType type, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end,
-                                           @RequestParam(required = false) Long hospitalId) {
-        return FileResponses.pdf(reportQueryService.loansPdf(type, start, end, hospitalId),
+                                           @RequestParam(required = false) Long hospitalId, @RequestParam(required = false) String lot) {
+        return FileResponses.pdf(reportQueryService.loansPdf(type, start, end, hospitalId, lot),
                 type == LoanType.RETURN ? "devolucoes.pdf" : "emprestimos.pdf", false);
     }
 
     @GetMapping("/movements")
-    @Operation(summary = "Stock movements in the period (at most 3000, newest first) (ADMIN)")
+    @Operation(summary = "Stock movements in the period (at most 3000, newest first) (ADMIN)",
+               description = "With lot or invoice, the period and the hospital are ignored: both questions "
+                       + "are about where material went, not about a date. invoice is the printed number; "
+                       + "invoiceId points at one exact invoice, which is what the Em transporte screen uses. "
+                       + "An invoice resolves to the lots it brought in, so a lot that also came in another "
+                       + "invoice carries the movements of both.")
     public List<StockMovementDTO> movements(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end, @RequestParam(required = false) Long hospitalId,
-                                            @RequestParam(required = false) MovementType type) {
-        return reportQueryService.movements(start, end, hospitalId, type);
+                                            @RequestParam(required = false) MovementType type,
+                                            @RequestParam(required = false) String lot,
+                                            @RequestParam(required = false) String invoice,
+                                            @RequestParam(required = false) Long invoiceId) {
+        return reportQueryService.movements(start, end, hospitalId, type, lot, invoice, invoiceId);
     }
 
     @GetMapping("/movements/pdf")
     public ResponseEntity<byte[]> movementsPdf(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start, @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end, @RequestParam(required = false) Long hospitalId,
-                                               @RequestParam(required = false) MovementType type) {
-        return FileResponses.pdf(reportQueryService.movementsPdf(start, end, hospitalId, type), "movimentacoes.pdf", false);
+                                               @RequestParam(required = false) MovementType type,
+                                               @RequestParam(required = false) String lot,
+                                               @RequestParam(required = false) String invoice,
+                                               @RequestParam(required = false) Long invoiceId) {
+        return FileResponses.pdf(reportQueryService.movementsPdf(start, end, hospitalId, type, lot, invoice, invoiceId),
+                "movimentacoes.pdf", false);
     }
 }
