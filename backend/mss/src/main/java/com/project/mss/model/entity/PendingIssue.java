@@ -30,6 +30,14 @@ public class PendingIssue {
     @JoinColumn(name = "hospital_id")
     private Hospital hospital;
 
+    /**
+     * Entry item the issue is about, for WITHOUT_INVOICE. It is what lets the invoice be written against the
+     * right line when the administrator finally informs it; a surgery issue leaves it null.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "stock_entry_item_id")
+    private StockEntryItem stockEntryItem;
+
     @Column(name = "entered_code", nullable = false, length = 200)
     private String enteredCode;
 

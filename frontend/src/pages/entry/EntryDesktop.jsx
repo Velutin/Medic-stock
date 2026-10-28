@@ -19,6 +19,8 @@ import EntryHistory from './EntryHistory';
 import EntryImportDialog from './EntryImportDialog';
 import ExpiryField from './ExpiryField';
 import LotRefChangeDialog from './LotRefChangeDialog';
+import InvoiceKeysField from './InvoiceKeysField';
+import EntryInvoiceDialog from './EntryInvoiceDialog';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -136,6 +138,7 @@ export default function EntryDesktop({ entry }) {
               inputProps={{ max: todayIso() }} />
             <TextField label="Observação" value={draft.notes} onChange={(e) => setField('notes', e.target.value)}
               multiline minRows={3} inputProps={{ maxLength: 1000 }} />
+            <InvoiceKeysField entry={entry} />
             <Box sx={{ p: 1.5, borderRadius: '6px', backgroundColor: tokens.background, fontSize: 13, color: tokens.textMuted }}>
               Os itens entram na sala e ficam reservados ao destino escolhido.
             </Box>
@@ -169,6 +172,11 @@ export default function EntryDesktop({ entry }) {
             </Box>
 
             {item.material && <MaterialLabel material={item.material} />}
+            {item.invoiceNumber && (
+              <Alert severity="success" icon={false}>
+                REF e validade vieram da nota {item.invoiceNumber}. Confira a quantidade e adicione.
+              </Alert>
+            )}
             {reader.unknown && (
               <Alert severity="warning" action={(
                 <Button color="inherit" size="small" onClick={() => setNewItemOpen(true)}>Cadastrar item</Button>
@@ -244,6 +252,8 @@ export default function EntryDesktop({ entry }) {
         onAdd={async (lines) => { if (!(await addLines(lines)).problem) setImportOpen(false); }} />
       <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
         onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
+      <EntryInvoiceDialog summary={entry.invoiceSummary} onClose={() => entry.setInvoiceSummary(null)} />
+
     </>
   );
 }

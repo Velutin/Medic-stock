@@ -16,7 +16,11 @@ const mono = { fontFamily: tokens.mono, fontSize: 13 };
 export const REASONS = {
   LOT_NOT_FOUND: 'Lote não encontrado', AMBIGUOUS_LOT: 'Lote com mais de uma validade',
   EXPIRED_LOT: 'Lote vencido', NO_HOSPITAL_BALANCE: 'Sem saldo no hospital',
+  WITHOUT_INVOICE: 'Entrou sem nota',
 };
+
+/** Pendência de entrada: o material já está no estoque, o que falta é a nota. */
+const isWithoutInvoice = (issue) => issue?.reason === 'WITHOUT_INVOICE';
 const STATUS = { OPEN: ['warning', 'Em aberto'], RESOLVED: ['success', 'Resolvida'], DISCARDED: ['neutral', 'Descartada'] };
 
 const MAX_RESULTS = 15;
@@ -60,6 +64,7 @@ function ResolveDialog({ issue, onClose, onDone }) {
   const [inside, setInside] = useState(null);
   const [search, setSearch] = useState('');
   const [lotId, setLotId] = useState('');
+  const [invoiceNumber, setInvoiceNumber] = useState('');
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
   const fullScreen = useMediaQuery('(max-width:599.95px)');
@@ -68,17 +73,23 @@ function ResolveDialog({ issue, onClose, onDone }) {
     if (!issue) return;
     setMode('RESOLVED');
     setLotId('');
+    setInvoiceNumber('');
     setText('');
     setSearch('');
     setSuggested(null);
     setInside(null);
+    // A pendência de entrada não se resolve escolhendo lote: o lote já entrou, falta dizer de que nota ele veio
+    if (isWithoutInvoice(issue)) {
+      setSuggested([]);
+      return;
+    }
     api(`/pending-issues/${issue.id}/suggestions`).then(setSuggested).catch(() => setSuggested([]));
   }, [issue]);
 
   // Every lot inside the hospital, loaded only when a search is typed
   const term = search.trim().toUpperCase();
   useEffect(() => {
-    if (!issue || term.length < 2 || inside) return;
+    if (!issue || isWithoutInvoice(issue) || term.length < 2 || inside) return;
     api(`/stock/hospital/${issue.hospitalId}`)
       .then((rows) => setInside(rows.filter((r) => r.hospitalQuantity > 0).map((r) => ({
         lotId: r.lotId, ref: r.ref, material: materialName(r), lot: r.lot, expiryDate: r.expiryDate,
@@ -91,16 +102,34 @@ function ResolveDialog({ issue, onClose, onDone }) {
     : inside.filter((o) => lotContains(o.lot, term)
         || [o.ref, o.material].some((v) => (v || '').toUpperCase().includes(term)));
 
+  const withoutInvoice = isWithoutInvoice(issue);
+
+  const body = () => {
+    if (withoutInvoice) {
+      return mode === 'RESOLVED'
+        ? { status: 'RESOLVED', lotId: null, invoiceNumber: invoiceNumber.trim(),
+            resolution: text.trim() || `Vinculado à nota ${invoiceNumber.trim()}` }
+        : { status: 'DISCARDED', lotId: null, resolution: text.trim() };
+    }
+    return mode === 'RESOLVED'
+      ? { status: 'RESOLVED', lotId, resolution: text.trim() || 'Lote identificado na conferência' }
+      : { status: 'DISCARDED', lotId: null, resolution: text.trim() };
+  };
+
+  const done = () => {
+    if (withoutInvoice) {
+      return mode === 'RESOLVED'
+        ? `Lote vinculado à nota ${invoiceNumber.trim()}.`
+        : 'Registrado: o lote entrou sem nota.';
+    }
+    return mode === 'RESOLVED' ? 'Pendência resolvida: o lote foi lançado na cirurgia.' : 'Pendência descartada.';
+  };
+
   const save = async () => {
     setSaving(true);
     try {
-      await api(`/pending-issues/${issue.id}`, {
-        method: 'PATCH',
-        body: mode === 'RESOLVED'
-          ? { status: 'RESOLVED', lotId, resolution: text.trim() || 'Lote identificado na conferência' }
-          : { status: 'DISCARDED', lotId: null, resolution: text.trim() },
-      });
-      notify.success(mode === 'RESOLVED' ? 'Pendência resolvida: o lote foi lançado na cirurgia.' : 'Pendência descartada.');
+      await api(`/pending-issues/${issue.id}`, { method: 'PATCH', body: body() });
+      notify.success(done());
       onDone();
     } catch (err) {
       notify.error(err);
@@ -109,7 +138,8 @@ function ResolveDialog({ issue, onClose, onDone }) {
     }
   };
 
-  const valid = mode === 'RESOLVED' ? Boolean(lotId) : text.trim().length > 0;
+  const valid = mode === 'DISCARDED' ? text.trim().length > 0
+    : withoutInvoice ? invoiceNumber.trim().length > 0 : Boolean(lotId);
 
   return (
     <Dialog open={Boolean(issue)} onClose={onClose} fullWidth maxWidth="sm" fullScreen={fullScreen}>
@@ -118,14 +148,38 @@ function ResolveDialog({ issue, onClose, onDone }) {
         {issue && (
           <Stack spacing={2}>
             <Typography variant="body2">
-              <strong>{issue.patientName}</strong> · {issue.hospital} · {formatDate(issue.surgeryDate)}<br />
-              Item lido: <span style={mono}>{issue.enteredCode}</span>{issue.enteredRef ? ` (REF ${issue.enteredRef})` : ''} · {REASONS[issue.reason]}
+              {withoutInvoice ? (
+                <>
+                  <strong>Entrada{issue.entryId ? ` #${issue.entryId}` : ''}</strong> · {issue.hospital}
+                  {' · '}{formatDate(issue.createdAt)}<br />
+                  Lote: <span style={mono}>{issue.enteredCode}</span>
+                  {issue.enteredRef ? ` (REF ${issue.enteredRef})` : ''} · {issue.quantity}
+                  {issue.quantity === 1 ? ' unidade' : ' unidades'} · {REASONS[issue.reason]}
+                </>
+              ) : (
+                <>
+                  <strong>{issue.patientName}</strong> · {issue.hospital} · {formatDate(issue.surgeryDate)}<br />
+                  Item lido: <span style={mono}>{issue.enteredCode}</span>
+                  {issue.enteredRef ? ` (REF ${issue.enteredRef})` : ''} · {REASONS[issue.reason]}
+                </>
+              )}
             </Typography>
+            {withoutInvoice && (
+              <Typography variant="caption" color="text.secondary">
+                O material já está no estoque: o que falta é a nota. Informe o número dela, ou registre que
+                este lote veio sem nota mesmo.
+              </Typography>
+            )}
             <ToggleButtonGroup exclusive fullWidth color="primary" value={mode} onChange={(_, v) => v && setMode(v)}>
-              <ToggleButton value="RESOLVED">Lançar um lote do hospital</ToggleButton>
-              <ToggleButton value="DISCARDED">Descartar</ToggleButton>
+              <ToggleButton value="RESOLVED">{withoutInvoice ? 'Informar a nota' : 'Lançar um lote do hospital'}</ToggleButton>
+              <ToggleButton value="DISCARDED">{withoutInvoice ? 'Veio sem nota' : 'Descartar'}</ToggleButton>
             </ToggleButtonGroup>
-            {mode === 'RESOLVED' && (
+            {withoutInvoice && mode === 'RESOLVED' && (
+              <TextField size="small" label="Número da nota" value={invoiceNumber} autoComplete="off"
+                onChange={(e) => setInvoiceNumber(e.target.value.replace(/\D/g, ''))}
+                helperText="A nota já precisa estar no sistema. Se o XML ainda não chegou, peça à empresa para reenviar por e-mail." />
+            )}
+            {mode === 'RESOLVED' && !withoutInvoice && (
               <Stack spacing={1.25}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textTransform: 'uppercase' }}>
                   Lotes do item lido no hospital
@@ -162,19 +216,29 @@ function ResolveDialog({ issue, onClose, onDone }) {
             )}
             <TextField label={mode === 'RESOLVED' ? 'Observação (opcional)' : 'Justificativa'} required={mode === 'DISCARDED'}
               value={text} onChange={(e) => setText(e.target.value)} multiline minRows={2}
-              placeholder={mode === 'DISCARDED' ? 'Ex.: etiqueta do paciente lida por engano' : ''} />
+              placeholder={mode === 'DISCARDED'
+                ? (withoutInvoice ? 'Ex.: reposição de cirurgia, a empresa não emitiu nota' : 'Ex.: etiqueta do paciente lida por engano')
+                : ''} />
           </Stack>
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2 }}>
         <Button variant="outlined" onClick={onClose}>Cancelar</Button>
-        <Button variant="contained" onClick={save} disabled={!valid || saving}>{mode === 'RESOLVED' ? 'Lançar lote' : 'Descartar'}</Button>
+        <Button variant="contained" onClick={save} disabled={!valid || saving}>
+          {mode === 'DISCARDED' ? (withoutInvoice ? 'Registrar' : 'Descartar')
+            : withoutInvoice ? 'Vincular à nota' : 'Lançar lote'}
+        </Button>
       </DialogActions>
     </Dialog>
   );
 }
 
-/** Items left as pending issues at surgery withdrawals; the administrator resolves them here. */
+/**
+ * Pendências das duas origens: item lido na saída em cirurgia e lote que entrou sem nota.
+ *
+ * Ficam na mesma tela de propósito. São a mesma pergunta para quem administra - "o que ficou por resolver" -
+ * e separar em duas telas é como se perde de vista a segunda.
+ */
 export default function PendingReport({ query }) {
   const { data, reload } = useReport('/reports/pending-issues', query);
   const [resolving, setResolving] = useState(null);
@@ -187,14 +251,23 @@ export default function PendingReport({ query }) {
         <StatusChip tone="success">{data.length - open} resolvidas ou descartadas</StatusChip>
       </Box>
       {data.length === 0 ? <Empty>Nenhuma pendência no período.</Empty> : (
-        <PagedTable items={data} rowKey={(r) => r.id} minWidth={900}
-          columns={[{ label: 'Data da cirurgia' }, { label: 'Hospital' }, { label: 'Item lido' }, { label: 'Pendência' }, { label: 'Lançado por' }, { label: 'Situação' }, { label: '' }]}
+        <PagedTable items={data} rowKey={(r) => r.id} minWidth={980}
+          columns={[{ label: 'Data' }, { label: 'Origem' }, { label: 'Hospital' }, { label: 'Item' }, { label: 'Pendência' }, { label: 'Lançado por' }, { label: 'Situação' }, { label: '' }]}
           row={(r) => (<>
-            <TableCell>{formatDate(r.surgeryDate)}<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{r.patientName}</Typography></TableCell>
+            <TableCell>
+              {formatDate(r.date)}
+              {r.patientName && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{r.patientName}</Typography>}
+            </TableCell>
+            <TableCell>
+              {r.surgeryId ? 'Cirurgia' : 'Entrada'}
+              {!r.surgeryId && r.entryId && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>#{r.entryId}</Typography>
+              )}
+            </TableCell>
             <TableCell>{r.hospital}</TableCell>
             <TableCell><span style={mono}>{r.enteredCode}</span>{r.enteredRef && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>REF {r.enteredRef}</Typography>}</TableCell>
             <TableCell>{REASONS[r.reason] || r.reason}</TableCell>
-            <TableCell>{r.createdBy}</TableCell>
+            <TableCell>{r.createdBy || '—'}</TableCell>
             <TableCell>
               <StatusChip tone={STATUS[r.status][0]}>{STATUS[r.status][1]}</StatusChip>
               {r.resolution && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 220 }}>{r.resolution}</Typography>}

@@ -19,13 +19,17 @@ import jakarta.validation.constraints.Size;
  * same expiry month is reused instead of creating another one.
  * changeRef: a lot number belongs to only one REF. When the number is already registered with another REF, the
  * user confirms (true) that those lots become this item's REF; refused for lots already used in a surgery.
+ * invoiceKeys: access keys of the DANFEs scanned while unpacking. They do not restrict what can be received -
+ * a box regularly holds items of an invoice nobody scanned - they only come first when a lot is owed by more
+ * than one open invoice, and they make the entry report on those invoices even if nothing of theirs was read.
  */
 public record EntryFormDTO(
         @NotNull(message = "Destination is required") Long hospitalId,
         @NotNull(message = "Entry date is required")
         @PastOrPresent(message = "The entry date cannot be in the future") LocalDate entryDate,
         @Size(max = 1000) String notes,
-        @NotEmpty(message = "Add at least one item") @Valid List<Item> items
+        @NotEmpty(message = "Add at least one item") @Valid List<Item> items,
+        List<@Size(max = 44) String> invoiceKeys
 ) {
     public record Item(
             @NotNull(message = "Material is required") Long materialId,

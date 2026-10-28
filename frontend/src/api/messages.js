@@ -83,11 +83,46 @@ const EXACT = {
   'File not found': 'Arquivo não encontrado.',
   'Could not read the file': 'Não foi possível ler o arquivo.',
   'Provide either hospitalId or sourceHospitalId': 'Informe o hospital.',
+  'Closing reason is required': 'Informe o motivo do encerramento.',
+  'This invoice was fully received and does not need to be closed': 'Esta nota foi recebida por inteiro e não precisa ser encerrada.',
+  'Only a closed invoice can be reopened': 'Só uma nota encerrada pode ser reaberta.',
+  'The file is not an NF-e XML': 'O arquivo não é um XML de NF-e.',
+  'The NF-e XML has no valid access key': 'O XML não traz uma chave de acesso válida.',
+  'Could not read the NF-e XML': 'Não foi possível ler o XML da NF-e.',
+  'Reading hour must be a whole number between 0 and 23': 'O horário da leitura deve ser um número inteiro entre 0 e 23.',
+  'Alert days must be a whole number between 1 and 90': 'Os dias para alertar devem estar entre 1 e 90.',
+  'PDF retention must be a whole number between 30 and 1825 days':
+    'O prazo de guarda do PDF deve ser um número inteiro de dias, entre 30 e 1825.',
+  'The attachment is not a PDF': 'O anexo não é um PDF.',
+  'The PDF of this invoice was deleted after the retention period':
+    'O PDF desta nota foi apagado depois do prazo de guarda. A nota continua no sistema.',
+  'This invoice has no stored PDF': 'Esta nota não tem PDF guardado.',
+  'Only an instrument is received by confirmation; an implant is received by scanning its label':
+    'Só instrumental é recebido por confirmação. Implante é recebido lendo a etiqueta.',
+  'Inform the invoice number or accept the lot without an invoice':
+    'Informe o número da nota ou aceite o lote sem nota.',
+  'This pending issue is not about a missing invoice': 'Esta pendência não é de lote sem nota.',
+  'A pending issue about a missing invoice is not resolved with a lot':
+    'Pendência de lote sem nota não se resolve escolhendo um lote: informe a nota ou aceite sem nota.',
 };
 
 const segundos = (n) => (n === '1' ? '1 segundo' : `${n} segundos`);
 
 const PATTERNS = [
+  [/^Invoice item (\d+) not found$/, () => 'Item da nota não encontrado. Atualize a página e tente de novo.'],
+  [/^Invoice (\d+) not found$/, () => 'Nota não encontrada. Atualize a página e tente de novo.'],
+  [/^Pending tracking (\d+) not found$/, () => 'Este rastreio já foi tratado. Atualize a página.'],
+  [/^Setting (\S+) accepts only true or false$/, () => 'Esta configuração só aceita ligado ou desligado.'],
+  [/^Unknown setting: (.+)$/, (m) => `Configuração desconhecida: ${m[1]}.`],
+  [/^Unknown invoice status: (.+)$/, (m) => `Situação de nota desconhecida: ${m[1]}.`],
+  [/^Unknown item category: (.+)$/, (m) => `Tipo de item desconhecido: ${m[1]}.`],
+  [/^Could not save the invoice PDF: ?(.*)$/, () => 'Não foi possível guardar o PDF da nota.'],
+  [/^Invoice (\S+) is not registered yet: ask the supplier to send the XML again$/,
+    (m) => `A nota ${m[1]} ainda não está no sistema. Peça à empresa para reenviar o XML por e-mail; a pendência continua aberta até ele chegar.`],
+  [/^Invoice (\S+) is closed and cannot receive this lot$/,
+    (m) => `A nota ${m[1]} está encerrada e não pode receber este lote.`],
+  [/^Invoice (\S+) does not owe lot (\S+)$/,
+    (m) => `A nota ${m[1]} não está devendo o lote ${m[2]}. Confira o número da nota.`],
   [/^Too many sign-in attempts from this address\. Try again in (\d+) seconds\.$/,
     (m) => `Muitas tentativas de entrada a partir deste local. Aguarde ${segundos(m[1])} e tente novamente.`],
   [/^Too many sign-in attempts\. Try again in (\d+) seconds\.$/,
@@ -140,6 +175,9 @@ const PATTERNS = [
   [/^User (\d+) not found$/, () => 'Usuário não encontrado.'],
   [/^You do not have access to hospital (.+)$/, (m) => `Você não tem acesso ao hospital ${m[1]}.`],
   [/^Invalid or missing parameter/, () => 'Parâmetro inválido ou ausente.'],
+  // Resposta do Spring quando nenhuma rota casa: acontece com o frontend novo sobre um backend antigo
+  [/^No static resource/, () => 'Esta ação não existe nesta versão do servidor. Atualize o sistema (reconstrua o serviço) e tente de novo.'],
+  [/^Request method '\w+' is not supported$/, () => 'Esta ação não existe nesta versão do servidor. Atualize o sistema e tente de novo.'],
   [/^Lot (\S+) \(REF (.+)\) is expired and cannot be (received|delivered)$/,
     (m) => `O lote ${m[1]} (REF ${m[2]}) está vencido e não pode ${m[3] === 'received' ? 'entrar no estoque' : 'ser transferido'}.`],
   [/^Lot (\S+) \(REF (.+)\) has more than one expiry date in (\d{2}\/\d{4}): type the full date \(DD\/MM\/AAAA\) or read the QR code$/,
@@ -159,6 +197,16 @@ const PATTERNS = [
   [/^(.+) is a distribution center: deliver to one of the hospitals it supplies$/,
     (m) => `${m[1]} é um centro de distribuição: transfira para um dos hospitais atendidos.`],
   [/^Stock entry (\d+) not found$/, () => 'Entrada não encontrada.'],
+  [/^Invoice (\d+) not found$/, () => 'Nota não encontrada.'],
+  [/^Unknown invoice status: (.+)$/, () => 'Situação de nota desconhecida.'],
+  [/^Unknown setting: (.+)$/, (m) => `Configuração desconhecida: ${m[1]}.`],
+  [/^Setting (.+) accepts only true or false$/, () => 'Esta configuração só aceita ligada ou desligada.'],
+  [/^Emitter (.+) is not a registered supplier$/,
+    (m) => `A empresa ${m[1]} não está cadastrada como fornecedora: a nota foi arquivada.`],
+  [/^Invoice issued as an entry \(tpNF = 0\): it is a return, not a shipment$/,
+    () => 'Esta nota é de devolução, não de remessa: foi arquivada.'],
+  [/^CFOP (.+) is not in the shipment list$/,
+    (m) => `O CFOP ${m[1]} não é de remessa de material: a nota foi arquivada.`],
   [/^Material (\d+) not found$/, () => 'Item não encontrado no catálogo.'],
   [/^Section (\d+) not found$/, () => 'Seção não encontrada.'],
   [/^Section (.+) already exists$/, (m) => `Já existe a seção ${m[1]}.`],

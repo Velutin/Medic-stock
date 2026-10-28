@@ -20,8 +20,11 @@ import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 
 /**
- * Stores consumption sheets. Accepts a PDF or one or more photos;
- * photos are merged into a single PDF (one page per photo).
+ * Stores consumption sheets and the DANFEs that come with the supplier invoices.
+ *
+ * Sheets accept a PDF or one or more photos (merged into a single PDF, one page per photo). Invoice PDFs
+ * arrive by e-mail already as PDFs and are stored as they came; they are the only files here that expire,
+ * deleted by age so the folder does not grow forever.
  */
 @Service
 public class FileStorageService {
@@ -52,6 +55,37 @@ public class FileStorageService {
             throw e;
         } catch (Exception e) {
             throw new BusinessRuleException("Could not save the sheet: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Stores the DANFE of an invoice. Refuses anything that is not really a PDF: the name of an attachment
+     * is whatever the sender typed, the first bytes are what the file actually is.
+     */
+    public String saveInvoicePdf(Long invoiceId, byte[] pdf) {
+        if (pdf == null || !isPdf(pdf)) {
+            throw new BusinessRuleException("The attachment is not a PDF");
+        }
+        try {
+            Path folder = root.resolve("notas").resolve(String.valueOf(invoiceId));
+            Files.createDirectories(folder);
+            Path destination = folder.resolve("danfe-" + UUID.randomUUID() + ".pdf");
+            Files.write(destination, pdf);
+            return root.relativize(destination).toString();
+        } catch (Exception e) {
+            throw new BusinessRuleException("Could not save the invoice PDF: " + e.getMessage());
+        }
+    }
+
+    /** Deletes a stored file. Answers whether it was there, and never throws: this runs unattended. */
+    public boolean delete(String relativePath) {
+        if (relativePath == null) return false;
+        Path file = root.resolve(relativePath).normalize();
+        if (!file.startsWith(root)) return false;
+        try {
+            return Files.deleteIfExists(file);
+        } catch (IOException e) {
+            return false;
         }
     }
 

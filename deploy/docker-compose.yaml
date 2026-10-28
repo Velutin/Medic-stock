@@ -110,7 +110,9 @@ services:
       - "127.0.0.1:8082:8082"
     networks:
       - mss-network
-    mem_limit: 320m
+    # 448m já aplicado no servidor desde o deploy, aqui apenas registrado: a 320m o serviço
+    # ficava perto do limite e reiniciava.
+    mem_limit: 448m
     restart: unless-stopped
 
   mss:
@@ -170,6 +172,16 @@ services:
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:?defina MAIL_USERNAME no .env}
       MAIL_PASSWORD: ${MAIL_PASSWORD:?defina MAIL_PASSWORD no .env}
+      # Caixa das notas fiscais (IMAP). Conta dedicada, separada da que envia os convites acima:
+      # esta é aberta por um robô que marca mensagens como lidas; a outra é o remetente que os
+      # usuários respondem. No Gmail exige verificação em duas etapas + senha de aplicativo.
+      INVOICE_MAILBOX_ENABLED: ${INVOICE_MAILBOX_ENABLED:-false}
+      INVOICE_MAILBOX_HOST: ${INVOICE_MAILBOX_HOST:-imap.gmail.com}
+      INVOICE_MAILBOX_PORT: ${INVOICE_MAILBOX_PORT:-993}
+      INVOICE_MAILBOX_USERNAME: ${INVOICE_MAILBOX_USERNAME:-}
+      INVOICE_MAILBOX_PASSWORD: ${INVOICE_MAILBOX_PASSWORD:-}
+      INVOICE_MAILBOX_FOLDER: ${INVOICE_MAILBOX_FOLDER:-INBOX}
+      INVOICE_MAILBOX_PROCESSED_FOLDER: ${INVOICE_MAILBOX_PROCESSED_FOLDER:-}
       EUREKA_URL: http://eureka-server:8082/eureka/
       TZ: America/Bahia
     networks:
@@ -181,7 +193,10 @@ services:
         condition: service_healthy
       eureka-server:
         condition: service_started
-    mem_limit: 320m
+    # Medido antes da leitura IMAP: pico de 347 MiB dos 448 MiB anteriores, 78% do limite, com apenas
+    # 126 MiB de heap - o resto é memória nativa, que é justamente o que a conexão IMAP e a leitura de
+    # anexos fazem crescer. 640m deixa folga real; a máquina tem 1,5 GiB livres.
+    mem_limit: 640m
     restart: unless-stopped
 
   gateway:

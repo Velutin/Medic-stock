@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
   Box, Button, ButtonBase, IconButton, MenuItem, Paper, Stack, TextField, Typography,
@@ -43,8 +43,32 @@ const addDays = (iso, n) => {
 };
 const initialFilters = () => ({
   start: monthStartIso(), end: todayIso(), hospitalId: '', week: saturdayOf(todayIso()),
-  patient: '', status: 'OPEN', days: 30, movementType: '', lot: '',
+  patient: '', status: 'OPEN', days: 30, movementType: '', lot: '', invoice: '', invoiceId: undefined,
 });
+
+/** Reports where asking for a lot (or an invoice) makes sense: they all answer "where did this material go". */
+const USES_LOT = ['deliveries', 'loans', 'returns', 'movements'];
+
+/**
+ * The lot and invoice fields search on their own once typing stops.
+ *
+ * Requiring Enter leaves the screen in a state that looks like an answer and is not: the filter is in the
+ * field, the list below is the unfiltered one, and nothing says so. SEARCH_MIN_CHARS is there because one
+ * digit matches almost every lot - that search costs a lot and tells nothing; Enter still forces it.
+ */
+const SEARCH_DELAY_MS = 450;
+const SEARCH_MIN_CHARS = 3;
+
+/**
+ * What the typing is worth as a filter: too short counts as no filter at all.
+ *
+ * Erasing down to one digit has to drop the filter, not keep the previous answer on screen while the field
+ * shows something else - a list that no longer matches what is written above it is the bug this replaces.
+ */
+const filterValue = (typed) => {
+  const value = typed.trim();
+  return value.length >= SEARCH_MIN_CHARS ? value : '';
+};
 
 /** Reports: choose the report, filter, preview on screen and generate the PDF with the same filters. */
 export default function ReportsPage() {
@@ -56,9 +80,27 @@ export default function ReportsPage() {
   const [type, setType] = useState(() => (TYPES.some((t) => t.id === state?.report) ? state.report : 'consumption'));
   const [filters, setFilters] = useState(() => ({ ...initialFilters(), ...(state?.filters || {}) }));
   const [patientTyped, setPatientTyped] = useState('');
-  const [lotTyped, setLotTyped] = useState('');
+  const [lotTyped, setLotTyped] = useState(() => state?.filters?.lot || '');
+  const [invoiceTyped, setInvoiceTyped] = useState(() => state?.filters?.invoice || '');
   const current = TYPES.find((t) => t.id === type);
   const set = (field, value) => setFilters((f) => ({ ...f, [field]: value }));
+  const searchLot = (value) => set('lot', value);
+  // Typing a number by hand means "this number", not the invoice the Em transporte screen pointed at
+  const searchInvoice = (value) => setFilters((f) => ({ ...f, invoice: value, invoiceId: undefined }));
+
+  useEffect(() => {
+    const wanted = filterValue(lotTyped);
+    if (wanted === filters.lot) return undefined;
+    const timer = setTimeout(() => searchLot(wanted), SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [lotTyped, filters.lot]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const wanted = filterValue(invoiceTyped);
+    if (wanted === filters.invoice) return undefined;
+    const timer = setTimeout(() => searchInvoice(wanted), SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [invoiceTyped, filters.invoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hospitalId = filters.hospitalId || undefined;
   const period = { start: filters.start, end: filters.end, hospitalId };
@@ -69,12 +111,21 @@ export default function ReportsPage() {
     deliveries: { ...period, lot: filters.lot || undefined },
     consumption: { ...period, patient: filters.patient || undefined },
     validity: { hospitalId, days: filters.days },
-    loans: period,
-    returns: period,
-    movements: { ...period, type: filters.movementType || undefined },
+    loans: { ...period, lot: filters.lot || undefined },
+    returns: { ...period, lot: filters.lot || undefined },
+    movements: {
+      ...period,
+      type: filters.movementType || undefined,
+      lot: filters.lot || undefined,
+      invoice: filters.invoice || undefined,
+      invoiceId: filters.invoiceId || undefined,
+    },
   }[type];
   const usesPeriod = !['weekly', 'validity'].includes(type);
   const periodError = usesPeriod && filters.start > filters.end;
+  // Asking for a lot or an invoice is a question about material, not about a date: the server answers the
+  // whole history, so saying the period still applies would be a lie the screen tells.
+  const ignoringPeriod = USES_LOT.includes(type) && type !== 'deliveries' && Boolean(filters.lot || filters.invoice || filters.invoiceId);
 
   const pdf = async () => {
     const q = type === 'loans' ? { ...query, type: 'LOAN' } : type === 'returns' ? { ...query, type: 'RETURN' } : query;
@@ -89,6 +140,7 @@ export default function ReportsPage() {
     setFilters(initialFilters());
     setPatientTyped('');
     setLotTyped('');
+    setInvoiceTyped('');
   };
 
   return (
@@ -140,12 +192,19 @@ export default function ReportsPage() {
               onBlur={() => set('patient', patientTyped.trim())}
               onKeyDown={(e) => { if (e.key === 'Enter') set('patient', patientTyped.trim()); }} />
           )}
-          {type === 'deliveries' && (
-            <TextField size="small" label="Lote" value={lotTyped} autoComplete="off"
+          {USES_LOT.includes(type) && (
+            <TextField size="small" label="Lote" value={lotTyped} autoComplete="off" sx={{ width: 180 }}
               onChange={(e) => setLotTyped(e.target.value.toUpperCase())}
-              onBlur={() => set('lot', lotTyped.trim())}
-              onKeyDown={(e) => { if (e.key === 'Enter') set('lot', lotTyped.trim()); }}
-              helperText={filters.lot ? 'Entregas com este lote no período' : 'Tecle Enter para pesquisar'} />
+              onKeyDown={(e) => { if (e.key === 'Enter') searchLot(filterValue(lotTyped)); }}
+              helperText={filters.lot
+                ? (type === 'deliveries' ? 'Entregas com este lote no período' : 'Todo o histórico deste lote')
+                : (type === 'deliveries' ? 'Entregas com o lote, no período' : 'Busca em todo o histórico')} />
+          )}
+          {type === 'movements' && (
+            <TextField size="small" label="Nota fiscal" value={invoiceTyped} autoComplete="off" sx={{ width: 180 }}
+              onChange={(e) => setInvoiceTyped(e.target.value.replace(/\D/g, ''))}
+              onKeyDown={(e) => { if (e.key === 'Enter') searchInvoice(filterValue(invoiceTyped)); }}
+              helperText={filters.invoice || filters.invoiceId ? 'Movimentações dos lotes da nota' : 'Número impresso na nota'} />
           )}
           {type === 'pending' && (
             <TextField select size="small" label="Situação" value={filters.status} sx={{ minWidth: 180 }}
@@ -176,6 +235,13 @@ export default function ReportsPage() {
             )}
           </Stack>
         </Box>
+
+        {ignoringPeriod && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -1.5, mb: 2 }}>
+            Buscando por {filters.lot && (filters.invoice || filters.invoiceId) ? 'lote e nota' : filters.lot ? 'lote' : 'nota'}:
+            o período e o hospital são ignorados, para não esconder movimentações antigas do material.
+          </Typography>
+        )}
 
         {periodError ? null : (
           <>

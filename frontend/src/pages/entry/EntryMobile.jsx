@@ -14,6 +14,8 @@ import useItemReader from './useItemReader';
 import MaterialLabel from './MaterialLabel';
 import ExpiryField from './ExpiryField';
 import LotRefChangeDialog from './LotRefChangeDialog';
+import InvoiceKeysField from './InvoiceKeysField';
+import EntryInvoiceDialog from './EntryInvoiceDialog';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -98,6 +100,10 @@ export default function EntryMobile({ entry }) {
         onChange={(e) => setField('entryDate', e.target.value)} InputLabelProps={{ shrink: true }}
         inputProps={{ max: todayIso() }} />
 
+      {/* No celular a nota é lida pela câmera, como o resto: o código do DANFE é largo e baixo, bem
+          diferente das etiquetas, então vale mirar nele com calma */}
+      <InvoiceKeysField entry={entry} withCamera />
+
       {/*
         The camera stops reading once an item is on screen waiting to be typed (lot, expiry date, quantity):
         with the barcode labels the expiry date is typed by hand, and any code entering the frame meanwhile
@@ -126,6 +132,11 @@ export default function EntryMobile({ entry }) {
             {reader.awaitingLot && (
               <Alert severity="info" icon={false} sx={{ fontWeight: 600 }}>
                 Produto lido pelo código de barras. Agora leia o código de barras do LOTE.
+              </Alert>
+            )}
+            {item.invoiceNumber && (
+              <Alert severity="success" icon={false}>
+                REF e validade vieram da nota {item.invoiceNumber}.
               </Alert>
             )}
             {!reader.awaitingLot && item.lot && !item.expiryDate && (
@@ -204,6 +215,8 @@ export default function EntryMobile({ entry }) {
         onSaved={(saved) => { setNewItemOpen(false); reader.applyMaterial(saved); }} />
       <LotRefChangeDialog conflict={entry.refConflict} onConfirm={confirmRefChange}
         onCancel={() => { entry.cancelRefChange(); notify.warning('Item não adicionado. Confira a REF do item.'); }} />
+      <EntryInvoiceDialog summary={entry.invoiceSummary} onClose={() => entry.setInvoiceSummary(null)} />
+
     </Stack>
   );
 }

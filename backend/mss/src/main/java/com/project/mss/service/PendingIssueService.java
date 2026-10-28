@@ -23,6 +23,7 @@ import com.project.mss.model.entity.Material;
 import com.project.mss.model.entity.PendingIssue;
 import com.project.mss.model.entity.Stock;
 import com.project.mss.model.enums.ReadSource;
+import com.project.mss.model.enums.PendingIssueReason;
 import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.repository.LotRepository;
 import com.project.mss.repository.MaterialRepository;
@@ -39,11 +40,13 @@ public class PendingIssueService {
     private final LotRepository lotRepository;
     private final MaterialRepository materialRepository;
     private final StockService stockService;
+    private final EntryInvoiceLinkService invoiceLinkService;
 
     public PendingIssueService(PendingIssueRepository pendingIssueRepository, SurgeryService surgeryService,
                             MaterialService materialService, AccessControlService accessControlService,
                             LotScanService lotScanService, LotRepository lotRepository,
-                            MaterialRepository materialRepository, StockService stockService) {
+                            MaterialRepository materialRepository, StockService stockService,
+                            EntryInvoiceLinkService invoiceLinkService) {
         this.pendingIssueRepository = pendingIssueRepository;
         this.surgeryService = surgeryService;
         this.materialService = materialService;
@@ -52,6 +55,7 @@ public class PendingIssueService {
         this.lotRepository = lotRepository;
         this.materialRepository = materialRepository;
         this.stockService = stockService;
+        this.invoiceLinkService = invoiceLinkService;
     }
 
     /**
@@ -117,8 +121,11 @@ public class PendingIssueService {
 
     /**
      * Applies a status transition requested through PATCH /pending-issues/{id}.
-     * RESOLVED: records the given lot in the surgery (debiting the hospital stock).
-     * DISCARDED: closes the issue with the justification, without touching the stock.
+     * RESOLVED: records the given lot in the surgery (debiting the hospital stock). For a lot that entered
+     * without an invoice, it instead writes that lot against the invoice the administrator named - the
+     * stock is not touched, because the material entered when it was received.
+     * DISCARDED: closes the issue with the justification, without touching the stock. For a lot without an
+     * invoice this is the honest ending: it really came without one, and the reason says why.
      */
     @Transactional
     public PendingIssueDTO updateStatus(Long id, PendingIssueStatusUpdateDTO dto) {
@@ -128,8 +135,25 @@ public class PendingIssueService {
         if (p.getStatus() != PendingIssueStatus.OPEN) {
             throw new BusinessRuleException("Pending issue " + id + " was already handled");
         }
+        boolean withoutInvoice = p.getReason() == PendingIssueReason.WITHOUT_INVOICE;
+        if (!withoutInvoice && dto.invoiceNumber() != null && !dto.invoiceNumber().isBlank()) {
+            throw new BusinessRuleException("This pending issue is not about a missing invoice");
+        }
         switch (dto.status()) {
-            case RESOLVED -> resolve(p, dto.lotId());
+            case RESOLVED -> {
+                if (withoutInvoice) {
+                    if (dto.lotId() != null) {
+                        throw new BusinessRuleException(
+                                "A pending issue about a missing invoice is not resolved with a lot");
+                    }
+                    if (dto.invoiceNumber() == null || dto.invoiceNumber().isBlank()) {
+                        throw new BusinessRuleException("Inform the invoice number or accept the lot without an invoice");
+                    }
+                    invoiceLinkService.linkToInvoice(p, dto.invoiceNumber());
+                } else {
+                    resolve(p, dto.lotId());
+                }
+            }
             case DISCARDED -> {
                 if (dto.lotId() != null) {
                     throw new BusinessRuleException("A discarded pending issue cannot have a lot. Use RESOLVED instead.");

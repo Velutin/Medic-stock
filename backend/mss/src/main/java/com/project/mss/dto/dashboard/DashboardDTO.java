@@ -12,7 +12,10 @@ import com.project.mss.dto.stock.StockMovementDTO;
  *  - week*: closing week from Saturday to Friday, surgeries by surgery date, cancelled ones excluded;
  *  - openPendingIssues: surgery withdrawal items still waiting for a resolution (any date); the oldest and latest
  *    surgery dates among them let the Reports screen open the pending issues report with a period that holds all;
- *  - replenishmentAlerts: materials below the hospital ideal or the ideal total.
+ *  - replenishmentAlerts: materials below the hospital ideal or the ideal total;
+ *  - overdueInvoices: invoices open for longer than the configured number of days. Counted as invoices, not
+ *    items, and never filtered by hospital: material on its way arrives at the storeroom with no hospital
+ *    decided yet, so the number is the same whichever hospital is selected.
  */
 public record DashboardDTO(
         LocalDate weekStart,
@@ -22,6 +25,7 @@ public record DashboardDTO(
         long expiredLots,
         long weekSurgeries,
         long openPendingIssues,
+        long overdueInvoices,
         LocalDate oldestPendingDate,
         LocalDate latestPendingDate,
         List<HospitalSurgeries> surgeriesByHospital,

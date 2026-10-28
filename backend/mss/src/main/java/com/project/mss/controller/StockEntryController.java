@@ -16,8 +16,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import com.project.mss.dto.entry.EntryDTO;
 import com.project.mss.dto.entry.EntryFormDTO;
+import com.project.mss.dto.entry.EntryInvoiceSummaryDTO;
+import com.project.mss.dto.entry.InvoiceLotDTO;
 import com.project.mss.dto.entry.EntryPreviewRowDTO;
 import com.project.mss.dto.entry.LotRefConflictDTO;
+import com.project.mss.service.EntryInvoiceLinkService;
 import com.project.mss.service.ImportService;
 import com.project.mss.service.LotRefChangeService;
 import com.project.mss.service.StockEntryService;
@@ -34,12 +37,15 @@ public class StockEntryController {
     private final StockEntryService stockEntryService;
     private final ImportService importService;
     private final LotRefChangeService lotRefChangeService;
+    private final EntryInvoiceLinkService invoiceLinkService;
 
     public StockEntryController(StockEntryService stockEntryService, ImportService importService,
-                                LotRefChangeService lotRefChangeService) {
+                                LotRefChangeService lotRefChangeService,
+                                EntryInvoiceLinkService invoiceLinkService) {
         this.stockEntryService = stockEntryService;
         this.importService = importService;
         this.lotRefChangeService = lotRefChangeService;
+        this.invoiceLinkService = invoiceLinkService;
     }
 
     @PostMapping
@@ -79,6 +85,26 @@ public class StockEntryController {
                        + "used in a surgery (usedInSurgery) cannot be changed.")
     public List<LotRefConflictDTO> lotConflicts(@RequestBody @Valid List<LotRefConflictDTO.Check> checks) {
         return lotRefChangeService.check(checks);
+    }
+
+    @GetMapping("/invoice-lots/{lot}")
+    @Operation(summary = "Lot an open invoice is owing: REF and expiry date already declared by the supplier",
+               description = "Lets the entry be made by reading the lot alone. Answers 204 when no open "
+                       + "invoice owes that lot, or when the invoices disagree about the REF or the expiry "
+                       + "date - the ordinary flow (read the REF, type the date) handles those.")
+    public ResponseEntity<InvoiceLotDTO> invoiceLot(@PathVariable String lot) {
+        return invoiceLinkService.lookupLot(lot)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    @PostMapping("/instrument-confirmations")
+    @Operation(summary = "Confirm instruments received in the same box",
+               description = "Instruments arrive loose, with no label to scan, so they are received by "
+                       + "confirmation. Recorded as a confirmation and not as a scan: for an audit, what was "
+                       + "checked by a reader and what was checked by eye are different evidence.")
+    public EntryInvoiceSummaryDTO confirmInstruments(@RequestBody List<Long> invoiceItemIds) {
+        return invoiceLinkService.confirmInstruments(invoiceItemIds);
     }
 
     @PostMapping(value = "/preview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

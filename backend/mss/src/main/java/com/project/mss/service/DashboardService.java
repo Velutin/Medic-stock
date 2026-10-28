@@ -21,7 +21,10 @@ import com.project.mss.repository.StockMovementRepository;
 import com.project.mss.repository.StockRepository;
 import com.project.mss.repository.SurgeryRepository;
 
-/** Administrator's dashboard: stock indicators, the closing week, open pending issues, replenishment alerts and latest movements. */
+/**
+ * Administrator's dashboard: stock indicators, the closing week, open pending issues, invoices that have not
+ * arrived, replenishment alerts and latest movements.
+ */
 @Service
 public class DashboardService {
 
@@ -35,10 +38,12 @@ public class DashboardService {
     private final PendingIssueRepository pendingIssueRepository;
     private final ReplenishmentService replenishmentService;
     private final AccessControlService accessControlService;
+    private final SupplierInvoiceService supplierInvoiceService;
 
     public DashboardService(StockRepository stockRepository, SurgeryRepository surgeryRepository,
                             StockMovementRepository stockMovementRepository, HospitalRepository hospitalRepository,
-                            PendingIssueRepository pendingIssueRepository, ReplenishmentService replenishmentService, AccessControlService accessControlService) {
+                            PendingIssueRepository pendingIssueRepository, ReplenishmentService replenishmentService,
+                            AccessControlService accessControlService, SupplierInvoiceService supplierInvoiceService) {
         this.stockRepository = stockRepository;
         this.surgeryRepository = surgeryRepository;
         this.stockMovementRepository = stockMovementRepository;
@@ -46,6 +51,7 @@ public class DashboardService {
         this.pendingIssueRepository = pendingIssueRepository;
         this.replenishmentService = replenishmentService;
         this.accessControlService = accessControlService;
+        this.supplierInvoiceService = supplierInvoiceService;
     }
 
     /** hospitalId empty: every hospital (and distribution center). */
@@ -59,8 +65,12 @@ public class DashboardService {
         LocalDate weekStart = ReportService.weekStart(today);
         LocalDate weekEnd = weekStart.plusDays(6);
 
+        // Material on its way has no hospital decided yet, so the count is the same for every selection
+        long overdueInvoices = supplierInvoiceService.countOverdue();
+
         if (hospitals.isEmpty()) {
-            return new DashboardDTO(weekStart, weekEnd, 0, 0, 0, 0, 0, null, null, List.of(), List.of(), List.of());
+            return new DashboardDTO(weekStart, weekEnd, 0, 0, 0, 0, 0, overdueInvoices, null, null,
+                    List.of(), List.of(), List.of());
         }
 
         long units = stockRepository.sumValidUnits(hospitals, today);
@@ -93,6 +103,6 @@ public class DashboardService {
                 .map(StockMovementDTO::of).toList();
 
         return new DashboardDTO(weekStart, weekEnd, units, expiring, expired, weekSurgeries,
-                pending, oldestPending, latestPending, byHospital, alerts, movements);
+                pending, overdueInvoices, oldestPending, latestPending, byHospital, alerts, movements);
     }
 }
