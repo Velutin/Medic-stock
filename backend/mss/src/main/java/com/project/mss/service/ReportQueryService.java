@@ -657,6 +657,7 @@ public class ReportQueryService {
             case LOAN -> "Empréstimo";
             case SUPPLIER_RETURN -> "Devolução à Baumer";
             case LOT_CORRECTION -> "Correção de lote";
+            case STOREROOM_RETURN -> "Retirada para a sala";
         };
     }
 }

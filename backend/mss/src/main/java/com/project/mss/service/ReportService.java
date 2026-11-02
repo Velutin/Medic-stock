@@ -31,13 +31,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.project.mss.dto.stock.LotStockDTO;
-import com.project.mss.dto.stock.StockRowDTO;
 import com.project.mss.dto.report.WeeklySurgeriesDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.model.entity.Surgery;
 import com.project.mss.model.entity.Loan;
 import com.project.mss.model.entity.Delivery;
 import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.entity.StoreroomReturn;
 import com.project.mss.model.entity.SupplierOrder;
 import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.SurgeryStatus;
@@ -54,13 +54,15 @@ public class ReportService {
     private final DeliveryService deliveryService;
     private final SupplierOrderService supplierOrderService;
     private final LoanService loanService;
+    private final StoreroomReturnService storeroomReturnService;
     private final StockService stockService;
     private final SurgeryRepository surgeryRepository;
     private final StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository;
     private final AccessControlService accessControlService;
 
     public ReportService(PdfService pdfService, DeliveryService deliveryService,
-                            SupplierOrderService supplierOrderService, LoanService loanService, StockService stockService,
+                            SupplierOrderService supplierOrderService, LoanService loanService,
+                            StoreroomReturnService storeroomReturnService, StockService stockService,
                             SurgeryRepository surgeryRepository,
                             StockEntryItemInvoiceRepository stockEntryItemInvoiceRepository,
                             AccessControlService accessControlService) {
@@ -68,6 +70,7 @@ public class ReportService {
         this.deliveryService = deliveryService;
         this.supplierOrderService = supplierOrderService;
         this.loanService = loanService;
+        this.storeroomReturnService = storeroomReturnService;
         this.stockService = stockService;
         this.surgeryRepository = surgeryRepository;
         this.stockEntryItemInvoiceRepository = stockEntryItemInvoiceRepository;
@@ -143,6 +146,34 @@ public class ReportService {
 
     private static int pieces(Loan e) {
         return e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
+    }
+
+    /**
+     * Withdrawal report: the material that left a hospital and went back into the storeroom.
+     *
+     * The signatures are the other way round from a delivery, because here it is the hospital that hands the
+     * material over. Expired lots are flagged in the expiry column: they are a usual reason for a withdrawal,
+     * and the paper has to say so plainly.
+     */
+    @Transactional(readOnly = true)
+    public byte[] storeroomReturnPdf(Long returnId) {
+        StoreroomReturn e = storeroomReturnService.load(returnId);
+        LocalDate day = e.getCreatedAt().toLocalDate();
+        List<String[]> rows = e.getItems().stream().map(i -> {
+            var m = i.getLot().getMaterial();
+            String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
+            String expiry = fmt(i.getLot().getExpiryDate()) + (i.getLot().isExpired(day) ? " (vencido)" : "");
+            return new String[]{m.getRef(), name, i.getLot().getNumber(), expiry, String.valueOf(i.getQuantity())};
+        }).toList();
+        int total = e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
+        return pdfService.classicReport(new PdfService.ClassicReport("RETIRADA DE MATERIAIS",
+                "Retirada nº " + e.getId(),
+                List.of(new String[]{"ORIGEM", e.getHospital().getName() + " (hospital)"},
+                        new String[]{"DESTINO", e.getStoreroomHospital().getName() + " (sala)"},
+                        new String[]{"DATA DA RETIRADA", fmt(day)},
+                        new String[]{"RETIRADO POR", e.getCreatedBy() != null ? e.getCreatedBy().getName() : "-"}),
+                new float[]{2.2f, 1.1f, 1.4f, 1.6f, 1f}, rows, total, "Motivo", e.getReason(),
+                new String[]{"Entregue pelo hospital (nome legível e data)", "Retirado por"}));
     }
 
     /** Supplier order PDF. */
@@ -238,67 +269,6 @@ public class ReportService {
 
     private static final int INVOICE_LOOKUP_CHUNK = 500;
 
-    /** Hospital stock as Excel, with the size identification color on each row. */
-    @Transactional(readOnly = true)
-    public byte[] stockSpreadsheet(Long hospitalId) {
-        Hospital hospital = accessControlService.requireHospitalAccess(hospitalId);
-        List<StockRowDTO> rows = stockService.hospitalView(hospitalId, false);
-        // The first nine columns keep the layout of the spreadsheet this export replaces, and the sheet keeps
-        // its name, so the formulas pointing at them still work; the invoice column comes after them
-        Map<Long, String> invoices = invoicesByLot(rows.stream().map(StockRowDTO::lotId).filter(java.util.Objects::nonNull).distinct().toList());
-
-        try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            XSSFSheet sh = wb.createSheet("Estoque");
-            String[] header = {"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital", "Na sala",
-                               "Total", "Notas de origem"};
-
-            XSSFFont bold = wb.createFont();
-            bold.setBold(true);
-            XSSFCellStyle headerStyle = wb.createCellStyle();
-            headerStyle.setFont(bold);
-            headerStyle.setFillForegroundColor(new XSSFColor(new byte[]{(byte) 0xD9, (byte) 0xD9, (byte) 0xD9}, null));
-            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
-            borders(headerStyle);
-
-            Row title = sh.createRow(0);
-            title.createCell(0).setCellValue("Estoque - " + hospital.getName() + " - " + LocalDate.now().format(DATE));
-            title.getCell(0).setCellStyle(headerStyle);
-
-            Row r = sh.createRow(2);
-            for (int i = 0; i < header.length; i++) {
-                r.createCell(i).setCellValue(header[i]);
-                r.getCell(i).setCellStyle(headerStyle);
-            }
-
-            Map<String, XSSFCellStyle> stylesByColor = new HashMap<>();
-            XSSFCellStyle defaultStyle = wb.createCellStyle();
-            borders(defaultStyle);
-
-            int n = 3;
-            for (StockRowDTO l : rows) {
-                XSSFCellStyle style = l.color() == null ? defaultStyle
-                        : stylesByColor.computeIfAbsent(l.color(), color -> colorStyle(wb, color));
-                Row row = sh.createRow(n++);
-                Object[] v = {l.ref(), l.description(), l.component(), l.size(), l.lot(),
-                        l.expiryDate().format(DATE),
-                        l.hospitalQuantity(), l.storeroomQuantity(), l.hospitalQuantity() + l.storeroomQuantity(),
-                        invoices.getOrDefault(l.lotId(), "")};
-                for (int i = 0; i < v.length; i++) {
-                    var cell = row.createCell(i);
-                    if (v[i] instanceof Integer num) cell.setCellValue(num);
-                    else cell.setCellValue(v[i] == null ? "" : v[i].toString());
-                    cell.setCellStyle(style);
-                }
-            }
-            for (int i = 0; i < header.length; i++) sh.autoSizeColumn(i);
-            sh.createFreezePane(0, 3);
-            wb.write(out);
-            return out.toByteArray();
-        } catch (IOException e) {
-            throw new BusinessRuleException("Failed to generate spreadsheet: " + e.getMessage());
-        }
-    }
-
     /**
      * Stock by lot as Excel, exactly what the screen is showing: the same search and the same hospital filter,
      * so the file and the tab never disagree. location HOSPITAL is the "by lot" tab (balance inside the
@@ -316,7 +286,6 @@ public class ReportService {
         List<LotStockDTO> rows = page.getContent();
         String place = hospitalId == null ? (storeroom ? "Todas as salas" : "Todos os hospitais")
                 : accessControlService.requireHospitalAccess(hospitalId).getName();
-        Map<Long, String> invoices = invoicesByLot(rows.stream().map(LotStockDTO::lotId).filter(java.util.Objects::nonNull).distinct().toList());
 
         /*
          * The storeroom columns only exist for an administrator. For a read-only user the search already
@@ -324,7 +293,18 @@ public class ReportService {
          * state that there is nothing in the storeroom - which is not what the zero means. Leaving the
          * columns out says the truth: this file is about what is inside the hospital.
          */
-        boolean withStoreroom = accessControlService.isManager();
+        boolean manager = accessControlService.isManager();
+        boolean withStoreroom = manager;
+        /*
+         * The origin invoice is administrative information: which note brought the material in. A read-only
+         * user has no business with it, so the column is left out for that profile - and the notes are not
+         * even looked up, instead of being fetched and then dropped. Kept as its own flag, not as an alias of
+         * withStoreroom: they happen to share the same rule today, and a change to one must not move the other.
+         */
+        boolean withInvoices = manager;
+        Map<Long, String> invoices = withInvoices
+                ? invoicesByLot(rows.stream().map(LotStockDTO::lotId).filter(java.util.Objects::nonNull).distinct().toList())
+                : Map.of();
 
         String[] header;
         if (storeroom) {
@@ -335,7 +315,7 @@ public class ReportService {
                                   "Na sala", "Total", "Situação", "Dias para vencer", "Hospital", "Notas de origem"};
         } else {
             header = new String[]{"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "No hospital",
-                                  "Situação", "Dias para vencer", "Hospital", "Notas de origem"};
+                                  "Situação", "Dias para vencer", "Hospital"};
         }
 
         try (XSSFWorkbook wb = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -392,7 +372,7 @@ public class ReportService {
                 } else {
                     v = new Object[]{l.ref(), l.description(), l.component(), l.size(), l.lot(),
                                      l.expiryDate().format(DATE), l.hospitalQuantity(), status, daysLeft,
-                                     l.hospital(), origin};
+                                     l.hospital()};
                 }
                 XSSFCellStyle style = l.color() == null ? defaultStyle
                         : stylesByColor.computeIfAbsent(l.color(), color -> colorStyle(wb, color));

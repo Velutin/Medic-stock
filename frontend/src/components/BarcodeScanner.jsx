@@ -177,12 +177,14 @@ export default function BarcodeScanner({ onCode, paused = false, wide = false })
   const switchCamera = useCallback((event) => {
     event.stopPropagation();
     if (cameras.length < 2) return;
-    const current = cameras.findIndex((c) => c.deviceId === activeId);
+    // activeId is the camera the browser reported opening; deviceId is the one asked for. Falling back to
+    // the second keeps the button working on a browser whose getSettings() does not report a deviceId -
+    // without it the search below finds nothing and every press lands on the first camera again.
+    const current = cameras.findIndex((c) => c.deviceId === (activeId || deviceId));
     const next = cameras[(current + 1) % cameras.length];
     storeCamera(next.deviceId);
-    setResolution(null);
     setDeviceId(next.deviceId);
-  }, [cameras, activeId]);
+  }, [cameras, activeId, deviceId]);
 
   useEffect(() => {
     let cancelled = false;

@@ -114,7 +114,9 @@ public class FileStorageService {
                 throw new BusinessRuleException("Unsupported format in " + photo.getOriginalFilename()
                         + ". Send PDF, JPG or PNG (on iPhone, set the camera format to 'Most Compatible').");
             }
-            Image img = Image.getInstance(bytes);
+            // Upright first: the phone records how the picture has to be turned in the EXIF tag instead of
+            // turning the pixels, and OpenPDF reads the size from the JPEG frame header, never the tag.
+            Image img = Image.getInstance(PhotoOrientation.upright(bytes));
             float width = PageSize.A4.getWidth() - 40;
             float height = PageSize.A4.getHeight() - 40;
             img.scaleToFit(width, height);

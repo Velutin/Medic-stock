@@ -45,7 +45,7 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.POST, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers(HttpMethod.PUT, "/hospitals/**", "/materials/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/imports/**").hasAnyAuthority("ADMIN", "MASTER")
-                    .requestMatchers("/deliveries/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**", "/hospitals/*/prices/**").hasAnyAuthority("ADMIN", "MASTER")
+                    .requestMatchers("/deliveries/**", "/storeroom-returns/**", "/supplier-orders/**", "/hospitals/*/replenishment-suggestions", "/hospitals/*/minimums/**", "/hospitals/*/prices/**").hasAnyAuthority("ADMIN", "MASTER")
                     .requestMatchers("/reports/**", "/billing/**", "/billing-rates/**", "/dashboard/**").hasAnyAuthority("ADMIN", "MASTER")
                     // Invoices announce material on its way: administrative information, closed at the backend
                     // and not only hidden on the screen

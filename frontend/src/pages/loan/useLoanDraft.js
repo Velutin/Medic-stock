@@ -4,7 +4,8 @@ import { downloadFile } from '../../api/download';
 import { readCode } from '../../api/scan';
 import useHospitals from '../../hooks/useHospitals';
 import { useNotify } from '../../notifications/NotificationProvider';
-import { sameLot } from '../../utils/lot';
+import { formatDate } from '../../utils/format';
+import { matchExpiry, sameLot } from '../../utils/lot';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -131,15 +132,22 @@ export default function useLoanDraft() {
       return null;
     }
     const typed = code.trim().toUpperCase();
-    const candidates = scan.lot
-      ? rows.filter((r) => sameLot(r.lot, scan.lot) && (!scan.material || r.materialId === scan.material.id)
-          && (!scan.expiryDate || r.expiryDate === scan.expiryDate))
+    const sameNumber = scan.lot
+      ? rows.filter((r) => sameLot(r.lot, scan.lot) && (!scan.material || r.materialId === scan.material.id))
       : rows.filter((r) => sameLot(r.lot, typed));
+    const candidates = scan.lot ? matchExpiry(sameNumber, scan.expiryDate) : sameNumber;
     if (candidates.length === 0) {
       const where = location === 'HOSPITAL' ? `dentro de ${source.name}` : `na sala de ${source.name}`;
-      notify.error(!scan.lot && scan.material
-        ? `O código identifica a REF ${scan.material.ref}, mas não traz o lote. Leia a etiqueta do lote ou digite o lote.`
-        : `Lote ${scan.lot || typed} não está ${where}${kind === 'LOAN' ? ' (ou está vencido)' : ''}.`);
+      if (!scan.lot && scan.material) {
+        notify.error(`O código identifica a REF ${scan.material.ref}, mas não traz o lote. Leia a etiqueta do lote ou digite o lote.`);
+      } else if (sameNumber.length > 0) {
+        // The lot is here, in another month: the reading is refused on the date, not on the number
+        const dates = [...new Set(sameNumber.map((r) => formatDate(r.expiryDate)))].join(', ');
+        notify.error(`Lote ${scan.lot} está ${where} com validade ${dates}, e a etiqueta lida diz `
+          + `${formatDate(scan.expiryDate)}. Confira a etiqueta ou corrija a validade do lote no estoque.`);
+      } else {
+        notify.error(`Lote ${scan.lot || typed} não está ${where}${kind === 'LOAN' ? ' (ou está vencido)' : ''}.`);
+      }
       return null;
     }
     if (candidates.length > 1) return { candidates };

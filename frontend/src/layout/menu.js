@@ -2,6 +2,7 @@ import DashboardOutlined from '@mui/icons-material/DashboardOutlined';
 import Inventory2Outlined from '@mui/icons-material/Inventory2Outlined';
 import MoveToInboxOutlined from '@mui/icons-material/MoveToInboxOutlined';
 import LocalShippingOutlined from '@mui/icons-material/LocalShippingOutlined';
+import AssignmentReturnOutlined from '@mui/icons-material/AssignmentReturnOutlined';
 import LocalPostOfficeOutlined from '@mui/icons-material/LocalPostOfficeOutlined';
 import MedicalServicesOutlined from '@mui/icons-material/MedicalServicesOutlined';
 import AutorenewOutlined from '@mui/icons-material/AutorenewOutlined';
@@ -21,6 +22,8 @@ export const MENU = [
   { label: 'Estoque', path: '/estoque', icon: Inventory2Outlined, roles: [...ADMINS, 'SURGICAL_TECH', 'USER'] },
   { label: 'Entrada', path: '/entrada', icon: MoveToInboxOutlined, roles: ADMINS },
   { label: 'Transferência', path: '/transferencia', icon: LocalShippingOutlined, roles: ADMINS },
+  // Logo depois da Transferência: é o caminho de volta dela, hospital → sala
+  { label: 'Retirada para a sala', path: '/retirada', icon: AssignmentReturnOutlined, roles: ADMINS },
   { label: 'Saída em cirurgia', path: '/saida', icon: MedicalServicesOutlined, roles: [...ADMINS, 'SURGICAL_TECH'] },
   { label: 'Reposição', path: '/reposicao', icon: AutorenewOutlined, roles: ADMINS },
   { label: 'Empréstimos', path: '/emprestimos', icon: SwapHorizOutlined, roles: ADMINS },

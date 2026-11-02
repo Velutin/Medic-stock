@@ -62,6 +62,10 @@ public class StockMovement {
     @Column(name = "stock_entry_id")
     private Long stockEntryId;
 
+    /** Withdrawal document that took this material out of a hospital and back into the storeroom. */
+    @Column(name = "storeroom_return_id")
+    private Long storeroomReturnId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;

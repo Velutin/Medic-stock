@@ -221,10 +221,12 @@ const PATTERNS = [
   [/^(.+) is a distribution center: only the ideal total is used \(hospital ideal must be 0\)$/,
     (m) => `${m[1]} é um centro de distribuição: só o ideal total é usado (o ideal deve ser 0).`],
   [/^section (.+) is not registered$/, (m) => `seção ${m[1]} não cadastrada em Cadastros → Seções`],
-  [/^(Lot|Order|Delivery|Loan|Surgery|Hospital|User|Role|Pending issue|Surgical tech|Item|Stock entry|Section|Material|Lot scan) (.+) not found$/,
+  [/^(.+) is a distribution center: its material is already in the storeroom$/,
+    (m) => `${m[1]} é um centro de distribuição: o material dele já está na sala.`],
+  [/^(Lot|Order|Delivery|Loan|Surgery|Hospital|User|Role|Pending issue|Surgical tech|Item|Stock entry|Section|Material|Lot scan|Withdrawal) (.+) not found$/,
     (m) => `${({ Lot: 'Lote', Order: 'Pedido', Delivery: 'Entrega', Loan: 'Empréstimo', Surgery: 'Cirurgia', Hospital: 'Hospital',
       User: 'Usuário', Role: 'Perfil', 'Pending issue': 'Pendência', 'Surgical tech': 'Instrumentador', Item: 'Item',
-      'Stock entry': 'Entrada', Section: 'Seção', Material: 'Item' })[m[1]] || 'Registro'} não encontrado.`],
+      'Stock entry': 'Entrada', Section: 'Seção', Material: 'Item', Withdrawal: 'Retirada' })[m[1]] || 'Registro'} não encontrado.`],
 ];
 
 /** Field-level validation messages. */
@@ -242,6 +244,7 @@ const FIELDS = {
   'Section name is required': 'Informe o nome da seção.',
   'Destination hospital is required': 'Escolha o hospital de destino.',
   'Return reason is required': 'Informe o motivo da devolução.',
+  'Withdrawal reason is required': 'Informe o motivo da retirada.',
   'Choose a window between 0 and 365 days': 'Escolha uma janela entre 0 e 365 dias.',
   'Cancellation reason is required': 'Informe o motivo do cancelamento.',
   'Resolution is required': 'Informe a justificativa.',

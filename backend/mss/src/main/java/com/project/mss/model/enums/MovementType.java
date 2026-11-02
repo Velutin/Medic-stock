@@ -15,5 +15,11 @@ public enum MovementType {
      * Lot number or expiry date corrected by an administrator (typing error at the entry). Nothing moves:
      * the row carries quantity 0 and no hospital, and notes describe what the lot was and what it became.
      */
-    LOT_CORRECTION
+    LOT_CORRECTION,
+    /**
+     * Material taken out of a hospital and back into the storeroom: the opposite way of REPLENISHMENT.
+     * Its own type so the movements report counts the two directions apart instead of making them one
+     * "transfer" number that only the origin and destination columns could separate.
+     */
+    STOREROOM_RETURN
 }

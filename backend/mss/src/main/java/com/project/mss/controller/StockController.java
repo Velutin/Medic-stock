@@ -116,12 +116,6 @@ public class StockController {
                 misplaced ? "estoque-na-sala-fora-do-lugar.xlsx" : "estoque-na-sala.xlsx");
     }
 
-    @GetMapping("/hospital/{hospitalId}/xlsx")
-    @Operation(summary = "Download the hospital stock as Excel, with size colors")
-    public ResponseEntity<byte[]> spreadsheet(@PathVariable Long hospitalId) {
-        return FileResponses.xlsx(reportService.stockSpreadsheet(hospitalId), "hospital-stock-" + hospitalId + ".xlsx");
-    }
-
     @GetMapping("/hospital/{hospitalId}/movements")
     @Operation(summary = "Hospital stock movement history")
     public Page<StockMovementDTO> history(@PathVariable Long hospitalId,

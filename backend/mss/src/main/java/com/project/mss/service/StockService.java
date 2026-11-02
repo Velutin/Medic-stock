@@ -116,6 +116,26 @@ public class StockService {
         return stockMovementRepository.save(m);
     }
 
+    /**
+     * Material taken out of a hospital and back into the storeroom: leaves (hospital, HOSPITAL) and enters
+     * (storeroom owner, STOREROOM). The opposite way of a delivery, and the only way out of a hospital that
+     * keeps the material in stock. Expired lots are not refused here - taking them out is the point.
+     */
+    @Transactional
+    public StockMovement recordStoreroomReturn(Lot lot, int quantity, Hospital hospital, Hospital storeroom,
+                                               Long storeroomReturnId, String notes) {
+        debit(lot, hospital, Location.HOSPITAL, quantity);
+        credit(lot, storeroom, Location.STOREROOM, quantity);
+        StockMovement m = newMovement(MovementType.STOREROOM_RETURN, lot, quantity);
+        m.setSourceHospital(hospital);
+        m.setSourceLocation(Location.HOSPITAL);
+        m.setDestinationHospital(storeroom);
+        m.setDestinationLocation(Location.STOREROOM);
+        m.setStoreroomReturnId(storeroomReturnId);
+        m.setNotes(notes != null && notes.length() > 1000 ? notes.substring(0, 1000) : notes);
+        return stockMovementRepository.save(m);
+    }
+
     /** Material returned to the supplier: leaves the hospital (or its storeroom) and enters no other stock. */
     @Transactional
     public StockMovement recordSupplierReturn(Lot lot, int quantity, Hospital hospital, Location location, Long loanId,
