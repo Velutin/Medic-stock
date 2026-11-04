@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.loan.LoanDTO;
+import com.project.mss.dto.replenishment.ShipmentStatusUpdateDTO;
 import com.project.mss.dto.loan.LoanFormDTO;
 import com.project.mss.model.enums.LoanType;
 import com.project.mss.service.LoanService;
@@ -42,6 +43,20 @@ public class LoanController {
     @Operation(summary = "Latest 50 loans and returns (type=LOAN or RETURN to filter)")
     public List<LoanDTO> list(@RequestParam(required = false) LoanType type) {
         return loanService.list(type);
+    }
+
+    @GetMapping("/dispatched")
+    @Operation(summary = "Loans still on the road, newest first (ADMIN)")
+    public List<LoanDTO> dispatched() {
+        return loanService.listDispatched();
+    }
+
+    @PatchMapping("/{id}")
+    @Operation(summary = "Confirm the arrival of a loan, or call it off",
+               description = "Same rules as a transfer. A return to the supplier does not travel through "
+                       + "the system and is not confirmed here.")
+    public LoanDTO updateStatus(@PathVariable Long id, @RequestBody @Valid ShipmentStatusUpdateDTO dto) {
+        return loanService.updateStatus(id, dto);
     }
 
     @GetMapping("/{id}/pdf")

@@ -15,6 +15,29 @@ export const priceTableLabel = (value) => PRICE_TABLES.find((p) => p.value === v
 
 export const hospitalTypeLabel = (type) => (type === 'DISTRIBUTION_CENTER' ? 'Centro de distribuição' : 'Hospital');
 
+/**
+ * Nome do local de um saldo. Existe para a decisão viver num lugar só: antes cada tela repetia
+ * `location === 'STOREROOM' ? 'sala' : 'hospital'`, e um terceiro local não quebrava nada — só aparecia
+ * rotulado errado, em silêncio, em seis telas diferentes.
+ */
+export const LOCATION_LABELS = { STOREROOM: 'sala', HOSPITAL: 'hospital', IN_TRANSIT: 'a caminho' };
+
+/** 'sala', 'hospital' ou 'a caminho'. Valor desconhecido volta como veio, em vez de virar 'hospital'. */
+export const locationLabel = (location) => LOCATION_LABELS[location] || location || '';
+
+/** Igual, começando com maiúscula, para célula de tabela: 'Sala', 'Hospital', 'A caminho'. */
+export const locationTitle = (location) => {
+  const label = locationLabel(location);
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
+};
+
+/** 'Hospital Ortopédico (sala)'. Sem hospital, string vazia, como as telas já esperavam. */
+export const placeLabel = (hospital, location) => {
+  if (!hospital) return '';
+  const label = locationLabel(location);
+  return label ? `${hospital} (${label})` : hospital;
+};
+
 /** "2027-01-31" -> "31/01/2027" (no time zone shift). */
 export function formatDate(value) {
   if (!value) return '';

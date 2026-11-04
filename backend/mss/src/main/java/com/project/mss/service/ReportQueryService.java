@@ -313,7 +313,7 @@ public class ReportQueryService {
             List<String[]> rows = new ArrayList<>();
             for (var i : c.items()) {
                 String name = i.component() != null ? i.component() : i.description();
-                rows.add(new String[]{name, i.ref(), i.lot(), String.valueOf(i.quantity()),
+                rows.add(new String[]{name, i.ref(), Lot.printedNumber(i.lot()), String.valueOf(i.quantity()),
                         i.unitValue() == null ? "sem valor" : money(i.unitValue().multiply(BigDecimal.valueOf(i.quantity())))});
                 items += i.quantity();
             }
@@ -362,7 +362,7 @@ public class ReportQueryService {
     public byte[] validityPdf(Long hospitalId, int days) {
         List<ValidityReportDTO> list = validity(hospitalId, days);
         List<String[]> rows = list.stream().map(v -> new String[]{v.hospital(),
-                v.location() == Location.STOREROOM ? "Sala" : "Hospital", v.ref(), v.lot(), v.expiryDate().format(DATE),
+                locationLabel(v.location()), v.ref(), Lot.printedNumber(v.lot()), v.expiryDate().format(DATE),
                 v.daysLeft() < 0 ? "Vencido" : v.daysLeft() + " dias", String.valueOf(v.quantity())}).toList();
         long expired = list.stream().filter(v -> v.daysLeft() < 0).count();
         int units = list.stream().mapToInt(ValidityReportDTO::quantity).sum();
@@ -414,9 +414,11 @@ public class ReportQueryService {
             List<String[]> rows = new ArrayList<>();
             int sum = 0;
             for (LoanDTO.LoanLine i : l.items()) {
-                rows.add(new String[]{i.ref(), i.description(), i.lot(), i.expiryDate().format(DATE), String.valueOf(i.quantity())});
+                rows.add(new String[]{i.ref(), i.description(), Lot.printedNumber(i.lot()), i.expiryDate().format(DATE),
+                        String.valueOf(i.quantity())});
                 sum += i.quantity();
-                lots.add(i.ref() + "|" + i.lot());
+                // Counted without the leading zeros, so the same lot written the two ways is one lot here
+                lots.add(i.ref() + "|" + Lot.printedNumber(i.lot()));
             }
             units += sum;
             String from = l.sourceHospital() + (l.sourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)");
@@ -539,7 +541,7 @@ public class ReportQueryService {
         boolean searching = (lot != null && !lot.isBlank()) || (invoiceNumber != null && !invoiceNumber.isBlank())
                 || invoiceId != null;
         List<String[]> rows = list.stream().map(m -> new String[]{
-                m.date().format(DATE_TIME), movementLabel(m.type()), m.ref() + " · " + m.lot(), String.valueOf(m.quantity()),
+                m.date().format(DATE_TIME), movementLabel(m.type()), m.ref() + " · " + Lot.printedNumber(m.lot()), String.valueOf(m.quantity()),
                 place(m.sourceHospital(), m.sourceLocation()), place(m.destinationHospital(), m.destinationLocation()),
                 nvl(m.invoice()), nvl(m.user())}).toList();
         return summary("MOVIMENTAÇÕES", (searching
@@ -622,9 +624,32 @@ public class ReportQueryService {
         return "R$ " + String.format(Locale.of("pt", "BR"), "%,.2f", v == null ? BigDecimal.ZERO : v);
     }
 
+    /**
+     * Local de um lote na coluna "LOCAL" do PDF de validade. Três valores, e por isso um switch sem default:
+     * o ternario anterior dizia "Hospital" para tudo que nao estivesse na sala, e um lote a caminho sairia
+     * no papel como se ja estivesse no hospital.
+     */
+    private static String locationLabel(Location location) {
+        return switch (location) {
+            case STOREROOM -> "Sala";
+            case HOSPITAL -> "Hospital";
+            case IN_TRANSIT -> "A caminho";
+        };
+    }
+
+    /**
+     * "Hospital Ortopédico (sala)" nas colunas de origem e destino. Três locais, pelo mesmo motivo do
+     * locationLabel acima: o ternário anterior devolvia só o nome do hospital para o material a caminho, e a
+     * linha do despacho saía no PDF como se o material já estivesse lá. A tela já dizia certo.
+     */
     private static String place(String hospital, Location location) {
         if (hospital == null) return "";
-        return hospital + (location == Location.STOREROOM ? " (sala)" : location == Location.HOSPITAL ? " (hospital)" : "");
+        if (location == null) return hospital;
+        return hospital + switch (location) {
+            case STOREROOM -> " (sala)";
+            case HOSPITAL -> " (hospital)";
+            case IN_TRANSIT -> " (a caminho)";
+        };
     }
 
     private static String statusLabel(PendingIssueStatus s) {
@@ -658,6 +683,9 @@ public class ReportQueryService {
             case SUPPLIER_RETURN -> "Devolução à Baumer";
             case LOT_CORRECTION -> "Correção de lote";
             case STOREROOM_RETURN -> "Retirada para a sala";
+            case SHIPMENT_ARRIVAL -> "Chegada da remessa";
+            case SHIPMENT_RETURNED -> "Remessa devolvida à origem";
+            case SHIPMENT_LOST -> "Remessa extraviada";
         };
     }
 }

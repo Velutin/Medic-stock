@@ -215,6 +215,12 @@ const PATTERNS = [
   [/^(.+) is a distribution center: return from its storeroom$/, (m) => `${m[1]} é um centro de distribuição: devolva a partir da sala.`],
   [/^No billing rate starts in (.+)$/, () => 'Não há percentuais cadastrados para esse mês.'],
   [/^No billing rate registered for (.+)$/, (m) => `Não há percentuais cadastrados para ${m[1]}. Cadastre em Faturamento → Percentuais.`],
+  [/^Transfer (\d+) is not on the road: it is (.+)$/,
+    (m) => `A transferência nº ${m[1]} não está a caminho (situação: ${m[2]}).`],
+  [/^Loan (\d+) is not on the road: it is (.+)$/,
+    (m) => `O empréstimo nº ${m[1]} não está a caminho (situação: ${m[2]}).`],
+  [/^Lot (.+): (\d+) units received, but only (\d+) were dispatched$/,
+    (m) => `Lote ${m[1]}: ${m[2]} unidades recebidas, mas só ${m[3]} foram despachadas.`],
   [/^Invalid month '(.+)'/, (m) => `Mês inválido: ${m[1]}.`],
   [/^Failed to generate spreadsheet/, () => 'Não foi possível gerar a planilha.'],
   [/^REF (.+?): (.+)$/, (m) => `REF ${m[1]}: ${translateMessage(m[2])}`],
@@ -245,6 +251,23 @@ const FIELDS = {
   'Destination hospital is required': 'Escolha o hospital de destino.',
   'Return reason is required': 'Informe o motivo da devolução.',
   'Withdrawal reason is required': 'Informe o motivo da retirada.',
+  'The arrival date cannot be in the future': 'A data de chegada não pode ser no futuro.',
+  'The arrival date cannot be before the shipment was dispatched':
+    'A data de chegada não pode ser anterior ao despacho da remessa.',
+  'Say what happened to the material: it arrived, it never left, or it was lost':
+    'Diga o que aconteceu com o material: chegou, ficou na origem ou se extraviou.',
+  'This pending issue is not about a shipment': 'Esta pendência não é de remessa.',
+  'A shipment pending issue already knows its lot': 'A pendência de remessa já sabe qual é o lote.',
+  'This pending issue is not linked to a shipment line': 'Esta pendência não está ligada a um item de remessa.',
+  'Only a transfer still on the road can be called off':
+    'Só dá para cancelar uma transferência que ainda está a caminho.',
+  'Only a loan still on the road can be called off':
+    'Só dá para cancelar um empréstimo que ainda está a caminho.',
+  'A return to the supplier does not travel through the system':
+    'Devolução à Baumer não passa por confirmação de chegada.',
+  'A return to the supplier cannot be called off here': 'Devolução à Baumer não é cancelada por aqui.',
+  'A shipment is dispatched when it is created; it cannot be sent back to the road':
+    'A remessa já nasce despachada; não dá para mandá-la de volta à estrada.',
   'Choose a window between 0 and 365 days': 'Escolha uma janela entre 0 e 365 dias.',
   'Cancellation reason is required': 'Informe o motivo do cancelamento.',
   'Resolution is required': 'Informe a justificativa.',

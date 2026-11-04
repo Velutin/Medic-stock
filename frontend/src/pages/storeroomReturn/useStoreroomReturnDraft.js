@@ -4,7 +4,8 @@ import { downloadFile } from '../../api/download';
 import { readCode } from '../../api/scan';
 import useHospitals from '../../hooks/useHospitals';
 import { useNotify } from '../../notifications/NotificationProvider';
-import { sameLot } from '../../utils/lot';
+import { matchExpiry, sameLot } from '../../utils/lot';
+import { formatDate } from '../../utils/format';
 
 /**
  * Hospital -> storeroom withdrawal, shared by the computer and phone versions. The opposite way of the
@@ -120,15 +121,21 @@ export default function useStoreroomReturnDraft() {
       return null;
     }
     const typed = code.trim().toUpperCase();
-    const candidates = scan.lot
-      ? rows.filter((r) => sameLot(r.lot, scan.lot)
-          && (!scan.material || r.materialId === scan.material.id)
-          && (!scan.expiryDate || r.expiryDate === scan.expiryDate))
+    const sameNumber = scan.lot
+      ? rows.filter((r) => sameLot(r.lot, scan.lot) && (!scan.material || r.materialId === scan.material.id))
       : rows.filter((r) => sameLot(r.lot, typed));
+    // Same tolerance as the loan and the transfer: the QR brings the full date and the lot may have been
+    // registered on day 1 of the month, so the same month counts as the same lot.
+    const candidates = scan.lot ? matchExpiry(sameNumber, scan.expiryDate) : sameNumber;
 
     if (candidates.length === 0) {
       if (!scan.lot && scan.material) {
         notify.error(`O código identifica a REF ${scan.material.ref}, mas não traz o lote. Leia a etiqueta do lote ou digite o lote.`);
+      } else if (sameNumber.length > 0) {
+        // The lot is inside the hospital, in another month: refused on the date, not on the number
+        const dates = [...new Set(sameNumber.map((r) => formatDate(r.expiryDate)))].join(', ');
+        notify.error(`Lote ${scan.lot} está dentro de ${hospital.name} com validade ${dates}, e a etiqueta lida diz `
+          + `${formatDate(scan.expiryDate)}. Confira a etiqueta ou corrija a validade do lote no estoque.`);
       } else {
         notify.error(`Lote ${scan.lot || typed} não está dentro de ${hospital.name}.`);
       }

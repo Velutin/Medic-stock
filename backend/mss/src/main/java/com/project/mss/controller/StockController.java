@@ -97,7 +97,9 @@ public class StockController {
     @Operation(summary = "Download the stock by lot as Excel, with the same filters of the screen",
                description = "Takes the same term and hospitalId of GET /stock/lots, so the file matches what the "
                        + "screen is showing, including expired lots. Without hospitalId, every hospital the user "
-                       + "can see. Rows carry the size identification color.")
+                       + "can see. Rows carry the size identification color. For an administrator the file also "
+                       + "brings the sheets \"A caminho\" (balance still travelling, lot by lot) and \"Remessas\" "
+                       + "(what explains it), so a stock count needs one file and not two.")
     public ResponseEntity<byte[]> lotsSpreadsheet(@RequestParam(required = false) String term,
                                                   @RequestParam(required = false) Long hospitalId) {
         return FileResponses.xlsx(reportService.lotSpreadsheet(term, hospitalId, Location.HOSPITAL, false),

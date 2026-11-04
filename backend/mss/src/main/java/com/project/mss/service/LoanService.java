@@ -1,12 +1,15 @@
 package com.project.mss.service;
 
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.project.mss.dto.loan.LoanDTO;
 import com.project.mss.dto.loan.LoanFormDTO;
+import com.project.mss.dto.replenishment.ShipmentStatusUpdateDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Loan;
@@ -16,7 +19,9 @@ import com.project.mss.model.entity.Lot;
 import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.LoanType;
 import com.project.mss.model.enums.MovementType;
+import com.project.mss.model.enums.ShipmentStatus;
 import com.project.mss.repository.LoanRepository;
+import com.project.mss.repository.PendingIssueRepository;
 
 /**
  * Each storeroom item is assigned to a hospital, so moving material between
@@ -26,13 +31,16 @@ import com.project.mss.repository.LoanRepository;
 public class LoanService {
 
     private final LoanRepository loanRepository;
+    private final PendingIssueRepository pendingIssueRepository;
     private final StockService stockService;
     private final MaterialService materialService;
     private final AccessControlService accessControlService;
 
-    public LoanService(LoanRepository loanRepository, StockService stockService,
+    public LoanService(LoanRepository loanRepository, PendingIssueRepository pendingIssueRepository,
+                             StockService stockService,
                              MaterialService materialService, AccessControlService accessControlService) {
         this.loanRepository = loanRepository;
+        this.pendingIssueRepository = pendingIssueRepository;
         this.stockService = stockService;
         this.materialService = materialService;
         this.accessControlService = accessControlService;
@@ -59,6 +67,7 @@ public class LoanService {
 
         Loan e = new Loan();
         e.setType(LoanType.LOAN);
+        e.setStatus(ShipmentStatus.DISPATCHED);
         e.setSourceHospital(source);
         e.setSourceLocation(dto.sourceLocation());
         e.setDestinationHospital(destination);
@@ -68,8 +77,10 @@ public class LoanService {
 
         for (LoanFormDTO.LoanRequestItem item : dto.items()) {
             Lot lot = materialService.findLot(item.lotId());
+            // Into the road of the destination, not into its stock: a loan travels between hospitals and
+            // only belongs to the destination once someone there confirms the box.
             stockService.transfer(MovementType.LOAN, lot, item.quantity(),
-                    source, dto.sourceLocation(), destination, Location.HOSPITAL,
+                    source, dto.sourceLocation(), destination, Location.IN_TRANSIT,
                     e.getId(), null, "Loan #" + e.getId());
             e.getItems().add(new LoanItem(e, lot, item.quantity()));
         }
@@ -95,6 +106,10 @@ public class LoanService {
 
         Loan e = new Loan();
         e.setType(LoanType.RETURN);
+        // A return to the supplier does not travel through the system: it leaves the stock when it is sent,
+        // and Baumer confirms it outside. Born arrived, so it never shows up as a shipment on the road.
+        e.setStatus(ShipmentStatus.ARRIVED);
+        e.setArrivedOn(java.time.LocalDate.now());
         e.setSourceHospital(source);
         e.setSourceLocation(dto.sourceLocation());
         e.setReturnReason(dto.returnReason().trim());
@@ -109,6 +124,91 @@ public class LoanService {
             e.getItems().add(new LoanItem(e, lot, item.quantity()));
         }
         return LoanDTO.of(loanRepository.save(e));
+    }
+
+    /**
+     * Confirms that a loan reached the destination hospital. Same rules as a transfer: a line nobody
+     * mentions arrived whole, and what came short stays on the road as a pending issue.
+     */
+    /**
+     * Single state change of a shipment, as the surgery does it: the body says where it should go.
+     * A loan that is on the road either arrives or is called off; there is nothing else to do to it.
+     */
+    @Transactional
+    public LoanDTO updateStatus(Long id, ShipmentStatusUpdateDTO dto) {
+        return switch (dto.status()) {
+            case ARRIVED -> arrive(id, dto);
+            case CANCELLED -> cancel(id);
+            case DISPATCHED -> throw new BusinessRuleException(
+                    "A shipment is dispatched when it is created; it cannot be sent back to the road");
+        };
+    }
+
+    private LoanDTO arrive(Long id, ShipmentStatusUpdateDTO dto) {
+        accessControlService.requireManager();
+        Loan loan = load(id);
+        if (loan.getType() != LoanType.LOAN) {
+            throw new BusinessRuleException("A return to the supplier does not travel through the system");
+        }
+        if (loan.getStatus() != ShipmentStatus.DISPATCHED) {
+            throw new BusinessRuleException("Loan " + id + " is not on the road: it is " + loan.getStatus());
+        }
+        LocalDate day = ShipmentArrival.arrivalDay(dto, loan.getCreatedAt());
+        Map<Long, Integer> informed = ShipmentArrival.informedQuantities(dto);
+
+        for (LoanItem item : loan.getItems()) {
+            int sent = item.getQuantity();
+            int received = informed.getOrDefault(item.getId(), sent);
+            ShipmentArrival.requireWithinSent(received, sent, item.getLot().getNumber());
+            if (received > 0) {
+                stockService.recordShipmentArrival(item.getLot(), received, loan.getDestinationHospital(),
+                        loan.getId(), null, "Loan #" + loan.getId() + " received");
+            }
+            item.setArrivedQuantity(received);
+            if (received < sent) {
+                pendingIssueRepository.save(ShipmentArrival.notDelivered(loan.getDestinationHospital(),
+                        item.getLot(), sent - received, null, item));
+            }
+        }
+        loan.setStatus(ShipmentStatus.ARRIVED);
+        loan.setArrivedOn(day);
+        loan.setArrivedBy(accessControlService.currentUser());
+        return LoanDTO.of(loanRepository.save(loan));
+    }
+
+    /**
+     * Calls off a loan that never left. The material goes back to the exact place it came from - the source
+     * hospital's own stock or its storeroom - because anything else would invent a movement.
+     */
+    private LoanDTO cancel(Long id) {
+        accessControlService.requireManager();
+        Loan loan = load(id);
+        if (loan.getType() != LoanType.LOAN) {
+            throw new BusinessRuleException("A return to the supplier cannot be called off here");
+        }
+        if (loan.getStatus() != ShipmentStatus.DISPATCHED) {
+            throw new BusinessRuleException("Only a loan still on the road can be called off");
+        }
+        for (LoanItem item : loan.getItems()) {
+            stockService.recordShipmentReturn(item.getLot(), item.getQuantity(), loan.getDestinationHospital(),
+                    loan.getSourceHospital(), loan.getSourceLocation(), loan.getId(), null,
+                    "Loan #" + loan.getId() + " called off");
+        }
+        loan.setStatus(ShipmentStatus.CANCELLED);
+        return LoanDTO.of(loanRepository.save(loan));
+    }
+
+    /** Loans still on the road, newest first. */
+    @Transactional(readOnly = true)
+    public List<LoanDTO> listDispatched() {
+        accessControlService.requireManager();
+        var allowed = accessControlService.allowedHospitals();
+        return loanRepository.findByStatusOrderByCreatedAtDesc(ShipmentStatus.DISPATCHED).stream()
+                .filter(e -> e.getType() == LoanType.LOAN)
+                .filter(e -> e.getDestinationHospital() != null
+                        && (allowed.contains(e.getDestinationHospital().getId())
+                            || allowed.contains(e.getSourceHospital().getId())))
+                .map(LoanDTO::of).toList();
     }
 
     @Transactional(readOnly = true)

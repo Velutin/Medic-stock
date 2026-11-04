@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.Query;
 import com.project.mss.model.entity.Loan;
 
 public interface LoanRepository extends JpaRepository<Loan, Long> {
+
+    /** Shipments in a given state, newest first. Used by the screen that confirms arrivals. */
+    List<Loan> findByStatusOrderByCreatedAtDesc(com.project.mss.model.enums.ShipmentStatus status);
     List<Loan> findTop50ByOrderByCreatedAtDesc();
 
     /** Loans or returns of the given type created in [start, end] (reports; hospital filter applied by the caller). */

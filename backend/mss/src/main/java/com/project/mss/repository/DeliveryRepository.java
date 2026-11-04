@@ -9,6 +9,9 @@ import org.springframework.data.jpa.repository.Query;
 import com.project.mss.model.entity.Delivery;
 
 public interface DeliveryRepository extends JpaRepository<Delivery, Long> {
+
+    /** Shipments in a given state, newest first. Used by the screen that confirms arrivals. */
+    List<Delivery> findByStatusOrderByCreatedAtDesc(com.project.mss.model.enums.ShipmentStatus status);
     List<Delivery> findTop50ByHospitalIdOrderByCreatedAtDesc(Long hospitalId);
 
     List<Delivery> findTop50BySourceHospitalIdOrderByCreatedAtDesc(Long sourceHospitalId);

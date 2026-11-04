@@ -9,7 +9,7 @@ import StatusChip from '../../components/StatusChip';
 import { api } from '../../api/client';
 import useHospitals from '../../hooks/useHospitals';
 import { useNotify } from '../../notifications/NotificationProvider';
-import { formatDateTime } from '../../utils/format';
+import { formatDateTime, placeLabel } from '../../utils/format';
 import { tokens } from '../../theme';
 import { MOVEMENT_TYPES } from '../reports/SimpleReports';
 import { todayIso } from '../reports/reportUtils';
@@ -22,7 +22,11 @@ const weekDay = (iso, label) => {
   return `${label} ${d}/${m}`;
 };
 const place = (hospital, location) => (hospital
-  ? `${hospital}${location === 'STOREROOM' ? ' (sala)' : ''}` : null);
+  ? (placeLabel(hospital, location) || hospital) : null);
+/** Dias desde o despacho mais antigo em aberto. Mesmo limite da tela de remessas: sete dias chamam atenção. */
+const STALE_DAYS = 7;
+const daysSince = (iso) => (iso
+  ? Math.max(0, Math.floor((Date.now() - new Date(`${iso}T00:00:00`).getTime()) / 86400000)) : 0);
 
 function Kpi({ label, value, hint, tone, to, state }) {
   const color = tone === 'error' ? tokens.error : tone === 'warning' ? tokens.warning : tokens.text;
@@ -100,20 +104,32 @@ export default function DashboardPage() {
 
       {!data ? (
         <Stack spacing={2}>
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' } }}>
-            {[1, 2, 3, 4, 5, 6].map((i) => <Skeleton key={i} variant="rounded" height={118} />)}
+          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)', xl: 'repeat(4, 1fr)' } }}>
+            {[1, 2, 3, 4, 5, 6, 7].map((i) => <Skeleton key={i} variant="rounded" height={118} />)}
           </Box>
           <Skeleton variant="rounded" height={260} />
         </Stack>
       ) : (
         <Stack spacing={2.5}>
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)', xl: 'repeat(6, 1fr)' } }}>
-            <Kpi label="Itens em estoque" value={number(data.stockUnits)} hint="Hospitais + sala, lotes dentro da validade" to="/estoque" />
+          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)', xl: 'repeat(4, 1fr)' } }}>
+            {/* O total inclui o que está a caminho de propósito: material despachado não deixou de ser da
+                operação, e tirá-lo daqui faria o número cair a cada despacho, o que se lê como perda. Por
+                isso a parcela é dita em voz alta embaixo, em vez de ficar escondida na soma. */}
+            <Kpi label="Itens em estoque" value={number(data.stockUnits)} to="/estoque"
+              hint={data.inTransitUnits > 0
+                ? `Hospitais + sala + a caminho · ${number(data.inTransitUnits)} na estrada`
+                : 'Hospitais + sala, lotes dentro da validade'} />
             <Kpi label="Vencem em 30 dias" value={number(data.lotsExpiringIn30Days)} hint="Lotes a priorizar" tone={data.lotsExpiringIn30Days ? 'warning' : undefined} to="/relatorios" state={validityState} />
             <Kpi label="Vencidos" value={number(data.expiredLots)} hint="Lotes fora da contagem de reposição" tone={data.expiredLots ? 'error' : undefined} to="/relatorios" state={validityState} />
             <Kpi label="Cirurgias na semana" value={number(data.weekSurgeries)} hint="Fechamento na sexta (em aberto e concluídas)" to="/relatorios" />
             <Kpi label="Pendências" value={number(data.openPendingIssues)} hint="Em aberto na saída, aguardando conferência" tone={data.openPendingIssues ? 'warning' : undefined} to="/relatorios" state={pendingState} />
-            {/* Material a caminho não tem hospital definido, por isso o número é o mesmo em qualquer seleção */}
+            <Kpi label="Remessas a caminho" value={number(data.openShipments)} to="/remessas"
+              tone={daysSince(data.oldestDispatch) >= STALE_DAYS ? 'warning' : undefined}
+              hint={data.openShipments
+                ? `Aguardando confirmação · a mais antiga há ${daysSince(data.oldestDispatch)} ${daysSince(data.oldestDispatch) === 1 ? 'dia' : 'dias'}`
+                : 'Tudo que foi despachado já foi confirmado'} />
+            {/* Aqui "a caminho" é outro trajeto: material vindo da Baumer, que chega na sala sem hospital
+                definido. Por isso o número é o mesmo em qualquer seleção de hospital. */}
             <Kpi label="Notas não recebidas" value={number(data.overdueInvoices)} hint="Em aberto há mais dias que o configurado" tone={data.overdueInvoices ? 'warning' : undefined} to="/transporte" />
           </Box>
 

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import com.project.mss.dto.replenishment.DeliveryDTO;
 import com.project.mss.dto.replenishment.DeliveryFormDTO;
+import com.project.mss.dto.replenishment.ShipmentStatusUpdateDTO;
 import com.project.mss.exception.BusinessRuleException;
 import com.project.mss.service.DeliveryService;
 import com.project.mss.service.ReportService;
@@ -52,9 +53,25 @@ public class DeliveryController {
                 : deliveryService.listBySource(sourceHospitalId);
     }
 
+    @GetMapping("/dispatched")
+    @Operation(summary = "Transfers still on the road, newest first (ADMIN)")
+    public List<DeliveryDTO> dispatched() {
+        return deliveryService.listDispatched();
+    }
+
     @GetMapping("/{id}")
     public DeliveryDTO find(@PathVariable Long id) {
         return deliveryService.find(id);
+    }
+
+    @PatchMapping("/{id}")
+    @Operation(summary = "Confirm the arrival of a transfer, or call it off",
+               description = "ARRIVED moves what was received into the hospital; a line left out of items "
+                       + "counts as fully received, and anything short stays on the road as a pending issue. "
+                       + "CANCELLED puts everything back in the storeroom, and only while nothing has been "
+                       + "confirmed.")
+    public DeliveryDTO updateStatus(@PathVariable Long id, @RequestBody @Valid ShipmentStatusUpdateDTO dto) {
+        return deliveryService.updateStatus(id, dto);
     }
 
     @GetMapping("/{id}/pdf")

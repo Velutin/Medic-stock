@@ -1,8 +1,11 @@
 package com.project.mss.model.entity;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.project.mss.model.enums.ShipmentStatus;
 
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -29,6 +32,23 @@ public class Delivery {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "source_hospital_id")
     private Hospital sourceHospital;
+
+    /** Where the shipment is. See {@link ShipmentStatus}. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 12)
+    private ShipmentStatus status = ShipmentStatus.DISPATCHED;
+
+    /**
+     * The day the material reached the destination, as informed by whoever confirmed it - not the day the
+     * confirmation was typed. They are often different: the box arrives on Thursday and the arrival is
+     * registered on Saturday, from the photo of the signed note.
+     */
+    @Column(name = "arrived_on")
+    private LocalDate arrivedOn;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "arrived_by")
+    private User arrivedBy;
 
     @Column(columnDefinition = "TEXT")
     private String notes;

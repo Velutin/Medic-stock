@@ -86,7 +86,9 @@ export default function StockPage() {
         actions={lotTabs && (
           <>
             <Button variant="outlined" startIcon={<FileDownloadOutlined />} onClick={exportSpreadsheet}
-              title="Exporta o que está na tela, com o filtro e a busca atuais">
+              title={manager && tab === 'lots'
+                ? 'Exporta o que está na tela, com o filtro e a busca atuais, mais as abas "A caminho" e "Remessas"'
+                : 'Exporta o que está na tela, com o filtro e a busca atuais'}>
               Exportar planilha
             </Button>
             {manager && (

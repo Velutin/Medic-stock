@@ -46,6 +46,19 @@ public class PendingIssue {
     @Column(name = "declared_invoice", length = 120)
     private String declaredInvoice;
 
+    /**
+     * Shipment line the issue is about, for NOT_DELIVERED: the transfer item that was short. A surgery or
+     * entry issue leaves it null, as this one leaves theirs.
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "delivery_item_id")
+    private DeliveryItem deliveryItem;
+
+    /** The same, when the shipment was a loan between hospitals. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "loan_item_id")
+    private LoanItem loanItem;
+
     @Column(name = "entered_code", nullable = false, length = 200)
     private String enteredCode;
 

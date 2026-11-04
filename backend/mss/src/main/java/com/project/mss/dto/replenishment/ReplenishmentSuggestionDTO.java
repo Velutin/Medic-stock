@@ -17,6 +17,13 @@ public record ReplenishmentSuggestionDTO(
         int hospitalIdeal,
         int idealTotal,
         int hospitalBalance,
+        /**
+         * Units already dispatched to this hospital and not yet confirmed there. Its own number, never
+         * added to hospitalBalance: that field is what is physically in the hospital, and the screen
+         * colours and sorts by it being zero - a REF at zero with material coming is still a REF the
+         * hospital has nothing of right now.
+         */
+        int inTransitBalance,
         int storeroomBalance,
         int replenishFromStoreroom,
         int orderFromSupplier,

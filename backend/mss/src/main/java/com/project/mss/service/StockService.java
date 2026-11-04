@@ -136,6 +136,67 @@ public class StockService {
         return stockMovementRepository.save(m);
     }
 
+    // ======================================================== shipments on the road
+
+    /**
+     * Second leg of a shipment: the units left IN_TRANSIT and entered the hospital. Called once per line
+     * with what was actually in the box, which is less than what was sent when something is missing.
+     */
+    @Transactional
+    public StockMovement recordShipmentArrival(Lot lot, int quantity, Hospital hospital, Long loanId,
+                                               Long deliveryId, String notes) {
+        debit(lot, hospital, Location.IN_TRANSIT, quantity);
+        credit(lot, hospital, Location.HOSPITAL, quantity);
+        StockMovement m = newMovement(MovementType.SHIPMENT_ARRIVAL, lot, quantity);
+        m.setSourceHospital(hospital);
+        m.setSourceLocation(Location.IN_TRANSIT);
+        m.setDestinationHospital(hospital);
+        m.setDestinationLocation(Location.HOSPITAL);
+        m.setLoanId(loanId);
+        m.setDeliveryId(deliveryId);
+        m.setNotes(trimNotes(notes));
+        return stockMovementRepository.save(m);
+    }
+
+    /**
+     * A shipment goes back where it came from: called off before anyone confirmed it, or a line that turned
+     * out never to have left. The origin is passed in because it is not always the destination's storeroom -
+     * a loan comes from another hospital, and a covered hospital is supplied by its center.
+     */
+    @Transactional
+    public StockMovement recordShipmentReturn(Lot lot, int quantity, Hospital destination, Hospital origin,
+                                              Location originLocation, Long loanId, Long deliveryId, String notes) {
+        debit(lot, destination, Location.IN_TRANSIT, quantity);
+        credit(lot, origin, originLocation, quantity);
+        StockMovement m = newMovement(MovementType.SHIPMENT_RETURNED, lot, quantity);
+        m.setSourceHospital(destination);
+        m.setSourceLocation(Location.IN_TRANSIT);
+        m.setDestinationHospital(origin);
+        m.setDestinationLocation(originLocation);
+        m.setLoanId(loanId);
+        m.setDeliveryId(deliveryId);
+        m.setNotes(trimNotes(notes));
+        return stockMovementRepository.save(m);
+    }
+
+    /** Units that are gone: they leave the road and enter no stock, like a return to the supplier. */
+    @Transactional
+    public StockMovement recordShipmentLoss(Lot lot, int quantity, Hospital destination, Long loanId,
+                                            Long deliveryId, String notes) {
+        debit(lot, destination, Location.IN_TRANSIT, quantity);
+        StockMovement m = newMovement(MovementType.SHIPMENT_LOST, lot, quantity);
+        m.setSourceHospital(destination);
+        m.setSourceLocation(Location.IN_TRANSIT);
+        m.setLoanId(loanId);
+        m.setDeliveryId(deliveryId);
+        m.setNotes(trimNotes(notes));
+        return stockMovementRepository.save(m);
+    }
+
+    private static String trimNotes(String notes) {
+        return notes != null && notes.length() > 1000 ? notes.substring(0, 1000) : notes;
+    }
+
     /** Material returned to the supplier: leaves the hospital (or its storeroom) and enters no other stock. */
     @Transactional
     public StockMovement recordSupplierReturn(Lot lot, int quantity, Hospital hospital, Location location, Long loanId,
@@ -260,7 +321,7 @@ public class StockService {
 
     /** A distribution center only keeps material in the storeroom. */
     public static void requireValidLocation(Hospital hospital, Location location) {
-        if (hospital.isDistributionCenter() && location == Location.HOSPITAL) {
+        if (hospital.isDistributionCenter() && location != Location.STOREROOM) {
             throw new BusinessRuleException(hospital.getName()
                     + " is a distribution center: its material can only be in the storeroom");
         }
@@ -301,8 +362,13 @@ public class StockService {
             if (!includeExpired && l.isExpired(today)) continue;
             lots.putIfAbsent(l.getId(), l);
             int[] s = balances.computeIfAbsent(l.getId(), k -> new int[2]);
-            if (e.getLocation() == Location.HOSPITAL) s[0] += e.getQuantity();
-            else s[1] += e.getQuantity();
+            switch (e.getLocation()) {
+                case HOSPITAL -> s[0] += e.getQuantity();
+                case STOREROOM -> s[1] += e.getQuantity();
+                // Travelling to this hospital: neither of the two columns of this view, and never summed
+                // into what the hospital has. It gets a number of its own when the dispatch flow lands.
+                case IN_TRANSIT -> { }
+            }
         }
         List<StockRowDTO> rows = new ArrayList<>();
         lots.forEach((id, l) -> {
@@ -349,7 +415,9 @@ public class StockService {
             if (!allowed.contains(hId)) continue;
             // Dropped before the row is created, so a lot sitting only in the storeroom does not come back
             // to a read-only user as a row of zeros - which would still reveal that the lot exists.
-            if (!manager && e.getLocation() == Location.STOREROOM) continue;
+            // A read-only user sees only what is inside the hospital: not the storeroom, by the rule above,
+            // and not what is travelling to it either.
+            if (!manager && e.getLocation() != Location.HOSPITAL) continue;
             Lot l = e.getLot();
             if (!includeExpired && l.isExpired(today)) continue;
             hospitals.putIfAbsent(hId, e.getHospital());
@@ -357,8 +425,11 @@ public class StockService {
             int[] q = byMaterial.computeIfAbsent(l.getMaterial().getId(), k -> new LinkedHashMap<>())
                     .computeIfAbsent(hId, k -> new LinkedHashMap<>())
                     .computeIfAbsent(l.getId(), k -> new int[2]);
-            if (e.getLocation() == Location.HOSPITAL) q[0] += e.getQuantity();
-            else q[1] += e.getQuantity();
+            switch (e.getLocation()) {
+                case HOSPITAL -> q[0] += e.getQuantity();
+                case STOREROOM -> q[1] += e.getQuantity();
+                case IN_TRANSIT -> { } // as in hospitalView: its own number comes with the flow
+            }
         }
 
         List<MaterialStockDTO> result = new ArrayList<>();
@@ -439,18 +510,73 @@ public class StockService {
         return stockRepository.searchLotsAt(hospitals, t, Location.STOREROOM, pageable);
     }
 
-    /** Rows of a stock-by-lot export: the same search of the screen, so file and screen never disagree. */
+    /**
+     * Rows of a stock-by-lot export: the same search of the screen, minus the lots that exist only on the
+     * road.
+     *
+     * This is the one place where the sheet "Estoque" and the screen deliberately differ, and the reason is
+     * outside the system: the file is opened by a spreadsheet of his own, with formulas pointing at columns
+     * and at that sheet name. Rows of material that is not at the hospital yet would land inside the range
+     * those formulas read. What is on the road goes into sheets of its own in the same file - see
+     * inTransitLots and ReportService.inTransitSheets - so one count needs one file and nothing is hidden.
+     */
     @Transactional(readOnly = true)
     public Page<LotStockDTO> lotsForExport(String term, Long hospitalId, Location location, boolean misplaced) {
         Pageable page = PageRequest.of(0, MAX_EXPORT_ROWS);
-        return location == Location.STOREROOM ? searchStoreroomLots(term, hospitalId, misplaced, page)
-                : searchLots(term, hospitalId, page);
+        if (location == Location.STOREROOM) return searchStoreroomLots(term, hospitalId, misplaced, page);
+        Page<LotStockDTO> rows = searchLots(term, hospitalId, page);
+        List<LotStockDTO> settled = rows.getContent().stream()
+                .filter(r -> r.hospitalQuantity() + r.storeroomQuantity() > 0)
+                .toList();
+        /*
+         * The total is what the file says about itself: the export writes "showing the first N of M" when it
+         * was cut. Reporting the count of the query would make that warning fire every day a shipment is
+         * out, because the rows left out here are not rows that were cut off. So the real count only goes
+         * through when the page was actually filled to the ceiling.
+         */
+        boolean truncated = rows.getContent().size() >= MAX_EXPORT_ROWS;
+        return new PageImpl<>(settled, page, truncated ? rows.getTotalElements() : settled.size());
+    }
+
+    /**
+     * Every balance sitting on the road towards the hospitals the user can see, lot by lot: the listing an
+     * audit needs when a box is still travelling.
+     *
+     * Driven by the stock balance and not by the open shipments, because the balance is what has to add up.
+     * The two can differ: units that were dispatched, did not arrive and are waiting for a decision belong
+     * to a shipment already closed, and they are still on the road. Listing the shipments would leave those
+     * out of the count - exactly the ones an audit is looking for.
+     */
+    @Transactional(readOnly = true)
+    public List<LotStockDTO> inTransitLots(Long hospitalId, String term) {
+        accessControlService.requireManager();
+        java.util.Set<Long> hospitals = hospitalId != null
+                ? java.util.Set.of(accessControlService.requireHospitalAccess(hospitalId).getId())
+                : accessControlService.allowedHospitals();
+        if (hospitals.isEmpty()) return List.of();
+        LocalDate today = LocalDate.now();
+        List<LotStockDTO> rows = new ArrayList<>();
+        for (Long id : hospitals) {
+            for (Stock e : stockRepository.listByHospital(id)) {
+                if (e.getLocation() != Location.IN_TRANSIT || e.getQuantity() <= 0) continue;
+                Lot l = e.getLot();
+                Material m = l.getMaterial();
+                if (!matches(l, m, term)) continue;
+                rows.add(new LotStockDTO(l.getId(), m.getId(), m.getRef(), m.getComponent(), m.getDescription(),
+                        m.getSize(), m.getColor(), l.getNumber(), l.getExpiryDate(), l.isExpired(today),
+                        e.getHospital().getId(), e.getHospital().getName(), 0, 0, e.getQuantity()));
+            }
+        }
+        rows.sort(java.util.Comparator.comparing(LotStockDTO::hospital)
+                .thenComparing(LotStockDTO::ref)
+                .thenComparing(LotStockDTO::expiryDate));
+        return rows;
     }
 
     /**
      * Where a lot is, across the hospitals the user can see. A read-only user gets only the balances inside
-     * the hospitals: the storeroom is left out, as in the other two stock views, so the three answers about
-     * the same lot never disagree about what that profile may know.
+     * the hospitals: the storeroom is left out, as in the other two stock views, and so is what is on its
+     * way there, so the three answers about the same lot never disagree about what that profile may know.
      */
     @Transactional(readOnly = true)
     public List<LotBalanceDTO> findLotLocations(Long lotId) {
@@ -469,12 +595,22 @@ public class StockService {
      * Surgical tech's stock view: per material, the quantity inside the hospital (storeroom excluded),
      * ignoring expired lots, without lot details. Shows the REFs with an ideal greater than zero in the hospital
      * (quantity 0 when there is no balance) and any REF with balance. The screen groups by section.
+     *
+     * What is on its way to the hospital comes in a second number, never added to the first. The tech asks
+     * this screen what he has on the shelf today; a single sum of shelf and road would read as material he
+     * can pick up, and he would find the drawer empty. Two numbers answer both questions at once: nothing
+     * here, and something coming.
+     *
+     * A REF that exists only on the road is listed as well, with quantity zero: leaving it out would hide
+     * exactly the case the column was made for.
      */
     @Transactional(readOnly = true)
     public List<StockSummaryDTO> hospitalSummary(Long hospitalId) {
         accessControlService.requireHospitalAccess(hospitalId);
+        boolean withTransit = accessControlService.canSeeInTransit();
         LocalDate today = LocalDate.now();
         Map<Long, Integer> quantities = new LinkedHashMap<>();
+        Map<Long, Integer> inTransit = new LinkedHashMap<>();
         Map<Long, Material> materials = new LinkedHashMap<>();
         // REFs the hospital works with: ideal greater than zero (shown even without balance)
         for (MinimumStock ms : minimumStockRepository.listByHospital(hospitalId)) {
@@ -486,10 +622,23 @@ public class StockService {
         }
         // Balance inside the hospital (valid lots); a REF with balance is shown even without an ideal
         for (Stock e : stockRepository.listByHospital(hospitalId)) {
-            if (e.getLocation() != Location.HOSPITAL || e.getQuantity() <= 0 || e.getLot().isExpired(today)) continue;
+            if (e.getQuantity() <= 0 || e.getLot().isExpired(today)) continue;
             Material m = e.getLot().getMaterial();
-            materials.putIfAbsent(m.getId(), m);
-            quantities.merge(m.getId(), e.getQuantity(), Integer::sum);
+            switch (e.getLocation()) {
+                case HOSPITAL -> {
+                    materials.putIfAbsent(m.getId(), m);
+                    quantities.merge(m.getId(), e.getQuantity(), Integer::sum);
+                }
+                case IN_TRANSIT -> {
+                    if (withTransit) {
+                        materials.putIfAbsent(m.getId(), m);
+                        quantities.putIfAbsent(m.getId(), 0);
+                        inTransit.merge(m.getId(), e.getQuantity(), Integer::sum);
+                    }
+                }
+                // The storeroom is the company's stock, not the hospital's, and never was part of this view
+                case STOREROOM -> { }
+            }
         }
         return materials.values().stream()
                 .sorted(java.util.Comparator.comparing(Material::getRef))
@@ -497,6 +646,7 @@ public class StockService {
                     ProductSection s = m.getSection();
                     return new StockSummaryDTO(m.getId(), m.getRef(), m.getComponent(), m.getDescription(), m.getSize(),
                             m.getColor(), m.getProductLines().stream().sorted().toList(), quantities.get(m.getId()),
+                            inTransit.getOrDefault(m.getId(), 0),
                             s == null ? null : s.getId(), s == null ? null : s.getName(),
                             s == null ? null : s.getDisplayOrder());
                 })
@@ -511,6 +661,24 @@ public class StockService {
                         && e.getLot().getMaterial().getId().equals(materialId) && !e.getLot().isExpired(date))
                 .sorted(java.util.Comparator.comparing((Stock e) -> e.getLot().getExpiryDate()))
                 .toList();
+    }
+
+    /**
+     * The same search of the stock-by-lot screen, applied in memory: lot number (also without its leading
+     * zeros), REF, name, description or GTIN. It is written here, and not as another query, because what is
+     * on the road is a handful of rows and because the two lists have to answer the same search - a file
+     * whose sheets disagree about what was searched is worse than no file.
+     */
+    private static boolean matches(Lot l, Material m, String term) {
+        if (term == null || term.isBlank()) return true;
+        String t = term.trim().toUpperCase();
+        String bare = t.replaceFirst("^0+", "");
+        String number = l.getNumber() == null ? "" : l.getNumber().toUpperCase();
+        if (number.contains(t) || (!bare.isEmpty() && number.replaceFirst("^0+", "").contains(bare))) return true;
+        for (String field : new String[]{m.getRef(), m.getComponent(), m.getDescription(), m.getGtin()}) {
+            if (field != null && field.toUpperCase().contains(t)) return true;
+        }
+        return false;
     }
 
     private static boolean positive(Integer value) {
@@ -542,8 +710,13 @@ public class StockService {
     }
 
     private BusinessRuleException noBalance(Lot lot, Hospital hospital, Location loc, int available, int requested) {
-        String where = loc == Location.STOREROOM ? "in the storeroom (assigned to " + hospital.getName() + ")"
-                                              : "at " + hospital.getName();
+        // Three places, written out: once the arrival flow debits IN_TRANSIT, a two-way choice here would
+        // tell the person the material is missing "at the hospital" when it is missing from the road.
+        String where = switch (loc) {
+            case STOREROOM -> "in the storeroom (assigned to " + hospital.getName() + ")";
+            case HOSPITAL -> "at " + hospital.getName();
+            case IN_TRANSIT -> "on its way to " + hospital.getName();
+        };
         return new BusinessRuleException(String.format(
                 "Insufficient balance for lot %s (REF %s) %s: available %d, requested %d",
                 lot.getNumber(), lot.getMaterial().getRef(), where, available, requested));

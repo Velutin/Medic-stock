@@ -36,8 +36,8 @@ export default function InvoicesPage() {
 
   return (
     <>
-      <PageHeader title="Em transporte"
-        subtitle="Notas enviadas pela empresa, com o que ainda não chegou"
+      <PageHeader title="Notas e rastreio"
+        subtitle="Notas enviadas pela empresa e o rastreio do que ainda não chegou"
         actions={(
           <Button variant="outlined" startIcon={<RefreshOutlined />} onClick={readNow} disabled={reading}>
             Ler e-mails agora

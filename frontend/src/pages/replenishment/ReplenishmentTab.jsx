@@ -96,6 +96,7 @@ function StoreroomTable({ rows, showHospital }) {
             <TableRow>
               {showHospital && <TableCell>Hospital</TableCell>}
               <TableCell>REF</TableCell><TableCell>Material</TableCell><TableCell align="right">No hospital</TableCell>
+              <TableCell align="right">A caminho</TableCell>
               <TableCell align="right">Ideal</TableCell><TableCell align="right">Na sala</TableCell><TableCell align="right">Repor</TableCell>
             </TableRow>
           </TableHead>
@@ -111,6 +112,12 @@ function StoreroomTable({ rows, showHospital }) {
                   ? { color: tokens.error, fontWeight: 700, backgroundColor: tokens.errorBg }
                   : undefined}>
                   {r.hospitalBalance}
+                </TableCell>
+                {/* Sempre ao lado do saldo do hospital, nunca somado a ele: zerado no hospital continua
+                    zerado, em vermelho e no topo, mesmo com caixa a caminho. O que o número a caminho
+                    explica é a coluna "Repor" estar zerada apesar da falta. */}
+                <TableCell align="right" sx={r.inTransitBalance > 0 ? { color: tokens.textMuted } : undefined}>
+                  {r.inTransitBalance > 0 ? r.inTransitBalance : '—'}
                 </TableCell>
                 <TableCell align="right">{r.hospitalIdeal}</TableCell>
                 <TableCell align="right">{r.storeroomBalance}</TableCell>
@@ -270,7 +277,12 @@ export default function ReplenishmentTab({ hospital, hospitals }) {
                           </TableCell>
                           <RefCell row={r} />
                           <TableCell>{r.description}</TableCell>
-                          <TableCell align="right">{r.hospitalBalance + r.storeroomBalance}</TableCell>
+                          {/* Inclui o que está a caminho, que é o mesmo total que o cálculo de "Pedir"
+                              usa. Sem ele a linha não fecharia: total 3, ideal 5 e pedir 0 pareceria erro
+                              quando há 2 peças na estrada. */}
+                          <TableCell align="right">
+                            {r.hospitalBalance + r.inTransitBalance + r.storeroomBalance}
+                          </TableCell>
                           <TableCell align="right">{r.idealTotal}</TableCell>
                           <TableCell align="right" sx={{ py: 0.5 }}>
                             <TextField type="number" size="small" value={o.quantity ?? ''} disabled={!o.include} sx={{ width: 84 }}

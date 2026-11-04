@@ -10,7 +10,13 @@ import ChevronRight from '@mui/icons-material/ChevronRight';
 
 const ROWS_PER_PAGE = 10;
 
-/** One item (e.g. "Haste Cygnus SP"): sizes with quantity and REF, 10 per page. */
+/**
+ * One item (e.g. "Haste Cygnus SP"): sizes with quantity and REF, 10 per page.
+ *
+ * O que está a caminho aparece ao lado da quantidade, nunca somado a ela. A pergunta que esta tela responde
+ * é "o que eu tenho na prateleira agora": um número só, juntando prateleira e estrada, mandaria o
+ * instrumentador buscar material que não chegou.
+ */
 function Block({ block }) {
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(block.items.length / ROWS_PER_PAGE));
@@ -22,11 +28,22 @@ function Block({ block }) {
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
         <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{block.name}</Typography>
-        <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{block.total}</Typography>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, flexShrink: 0 }}>
+          <Typography sx={{ fontWeight: 600, fontSize: 14 }}>{block.total}</Typography>
+          {block.transit > 0 && (
+            <Typography variant="caption" sx={{ color: tokens.primary, fontWeight: 600 }}>
+              +{block.transit}
+            </Typography>
+          )}
+        </Box>
       </Box>
       <Table size="small">
         <TableHead>
-          <TableRow><TableCell>Tamanho</TableCell><TableCell align="right">Qtd.</TableCell><TableCell>REF</TableCell></TableRow>
+          <TableRow>
+            <TableCell>Tamanho</TableCell><TableCell align="right">Qtd.</TableCell>
+            {block.transit > 0 && <TableCell align="right">A caminho</TableCell>}
+            <TableCell>REF</TableCell>
+          </TableRow>
         </TableHead>
         <TableBody>
           {rows.map((r) => (
@@ -35,6 +52,11 @@ function Block({ block }) {
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><ColorSwatch color={r.color} />{r.size || '—'}</Box>
               </TableCell>
               <TableCell align="right" sx={{ fontWeight: 600, color: r.quantity === 0 ? tokens.error : undefined }}>{r.quantity}</TableCell>
+              {block.transit > 0 && (
+                <TableCell align="right" sx={{ color: r.inTransit > 0 ? tokens.primary : tokens.textMuted, fontWeight: r.inTransit > 0 ? 600 : 400 }}>
+                  {r.inTransit > 0 ? r.inTransit : '—'}
+                </TableCell>
+              )}
               <TableCell sx={{ fontFamily: tokens.mono, fontSize: 13 }}>{r.ref}</TableCell>
             </TableRow>
           ))}
@@ -111,13 +133,26 @@ export default function SummaryView({ hospitals, hospitalId, onHospitalChange, r
         byName.get(name).push(r);
       });
       const blocks = [...byName.entries()]
-        .map(([name, items]) => ({ name, items: items.sort(sizeCompare), total: items.reduce((s, i) => s + i.quantity, 0) }))
+        .map(([name, items]) => ({
+          name,
+          items: items.sort(sizeCompare),
+          total: items.reduce((s, i) => s + i.quantity, 0),
+          transit: items.reduce((s, i) => s + (i.inTransit || 0), 0),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-      return { ...sec, blocks, units: inSection.reduce((s, r) => s + r.quantity, 0), count: blocks.length };
+      return {
+        ...sec,
+        blocks,
+        units: inSection.reduce((s, r) => s + r.quantity, 0),
+        transit: inSection.reduce((s, r) => s + (r.inTransit || 0), 0),
+        count: blocks.length,
+      };
     }).filter((g) => g.count > 0);
   }, [rows, term, section, sections]);
 
   const hospitalName = hospitals.find((h) => h.id === hospitalId)?.name;
+  // Zero para o perfil Consulta, que não vê movimentação interna: a frase e as colunas somem com ele
+  const transitTotal = (rows || []).reduce((s, r) => s + (r.inTransit || 0), 0);
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 } }}>
@@ -140,6 +175,7 @@ export default function SummaryView({ hospitals, hospitalId, onHospitalChange, r
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
           {hospitalName} · atualizado às {loadedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
           Mostra o que tem estoque ideal no hospital e o que está dentro dele, sem lotes vencidos.
+          {transitTotal > 0 && ' A coluna “A caminho” é material já despachado que ainda não foi confirmado na chegada; ele não entra na quantidade.'}
         </Typography>
       )}
 
@@ -156,7 +192,14 @@ export default function SummaryView({ hospitals, hospitalId, onHospitalChange, r
               <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 1,
                 borderBottom: `2px solid ${tokens.primary}`, pb: 0.75, mb: 1.5 }}>
                 <Typography variant="h3" component="h3">{g.label}</Typography>
-                <Typography variant="caption" color="text.secondary">{g.count} {g.count === 1 ? 'item' : 'itens'} · {g.units} unidades</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {g.count} {g.count === 1 ? 'item' : 'itens'} · {g.units} unidades
+                  {g.transit > 0 && (
+                    <Typography component="span" variant="caption" sx={{ color: tokens.primary, fontWeight: 600 }}>
+                      {' '}· {g.transit} a caminho
+                    </Typography>
+                  )}
+                </Typography>
               </Box>
               <Box sx={{ display: 'grid', gap: 1.5, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, 1fr)', xl: 'repeat(3, 1fr)' } }}>
                 {g.blocks.map((b) => <Block key={b.name} block={b} />)}

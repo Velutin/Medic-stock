@@ -64,18 +64,27 @@ public class ReplenishmentService {
         Long storeroomHospitalId = center != null ? center.getId() : hospitalId;
         LocalDate today = LocalDate.now();
         Map<Long, Integer> inside = validBalances(insideHospitals(hospital), Location.HOSPITAL, today);
+        // Already dispatched and not yet confirmed. Counted here so the suggestion stops asking for material
+        // that is on its way: without it, a REF at zero in the hospital would be suggested again at every
+        // look, and the supplier order would ask Baumer for boxes already in the post.
+        Map<Long, Integer> onTheRoad = validBalances(insideHospitals(hospital), Location.IN_TRANSIT, today);
         Map<Long, Integer> storeroom = validBalances(List.of(storeroomHospitalId), Location.STOREROOM, today);
         List<ReplenishmentSuggestionDTO> result = new ArrayList<>();
 
         for (MinimumStock min : minimumStockRepository.listByHospital(hospitalId)) {
             Material m = min.getMaterial();
             int hospitalBalance = inside.getOrDefault(m.getId(), 0);
+            int inTransitBalance = onTheRoad.getOrDefault(m.getId(), 0);
             int storeroomBalance = storeroom.getOrDefault(m.getId(), 0);
 
+            // The shortage is measured against what is physically there, which keeps the zero that the
+            // screen paints red and lifts to the top honest. What is already on the road is then taken off
+            // what to send, so the shortage still shows and the suggestion comes out as zero.
             int hospitalShortage = hospital.isDistributionCenter() ? 0 : Math.max(0, min.getHospitalIdeal() - hospitalBalance);
-            int replenishFromStoreroom = Math.min(hospitalShortage, storeroomBalance);
+            int stillNeeded = Math.max(0, hospitalShortage - inTransitBalance);
+            int replenishFromStoreroom = Math.min(stillNeeded, storeroomBalance);
             int orderFromSupplier = center != null ? 0
-                    : Math.max(0, min.getIdealTotal() - (hospitalBalance + storeroomBalance));
+                    : Math.max(0, min.getIdealTotal() - (hospitalBalance + inTransitBalance + storeroomBalance));
 
             if (onlyWithShortage && replenishFromStoreroom == 0 && orderFromSupplier == 0) continue;
 
@@ -93,8 +102,8 @@ public class ReplenishmentService {
             }
 
             result.add(new ReplenishmentSuggestionDTO(m.getId(), m.getRef(), m.getDescription(), m.getColor(),
-                    min.getHospitalIdeal(), min.getIdealTotal(), hospitalBalance, storeroomBalance,
-                    replenishFromStoreroom, orderFromSupplier, storeroomHospitalId, lots));
+                    min.getHospitalIdeal(), min.getIdealTotal(), hospitalBalance, inTransitBalance,
+                    storeroomBalance, replenishFromStoreroom, orderFromSupplier, storeroomHospitalId, lots));
         }
         return result;
     }

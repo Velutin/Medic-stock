@@ -14,8 +14,13 @@ import com.project.mss.dto.stock.StockMovementDTO;
  *    surgery dates among them let the Reports screen open the pending issues report with a period that holds all;
  *  - replenishmentAlerts: materials below the hospital ideal or the ideal total;
  *  - overdueInvoices: invoices open for longer than the configured number of days. Counted as invoices, not
- *    items, and never filtered by hospital: material on its way arrives at the storeroom with no hospital
- *    decided yet, so the number is the same whichever hospital is selected.
+ *    items, and never filtered by hospital: material coming from the supplier arrives at the storeroom with
+ *    no hospital decided yet, so the number is the same whichever hospital is selected.
+ *  - inTransitUnits / openShipments / oldestDispatch: material dispatched to the hospitals and not yet
+ *    confirmed. The two numbers can disagree, and that is information, not a bug: units that stayed on the
+ *    road as a pending issue belong to a shipment already closed, so they are counted in the units and not
+ *    in the shipments. oldestDispatch is the dispatch date of the oldest open shipment, which is what turns
+ *    a forgotten box into something visible instead of a balance nobody looks for.
  */
 public record DashboardDTO(
         LocalDate weekStart,
@@ -30,7 +35,10 @@ public record DashboardDTO(
         LocalDate latestPendingDate,
         List<HospitalSurgeries> surgeriesByHospital,
         List<ReplenishmentAlert> replenishmentAlerts,
-        List<StockMovementDTO> recentMovements
+        List<StockMovementDTO> recentMovements,
+        long inTransitUnits,
+        long openShipments,
+        LocalDate oldestDispatch
 ) {
     public record HospitalSurgeries(Long hospitalId, String hospital, long surgeries) { }
 

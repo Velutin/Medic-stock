@@ -450,11 +450,15 @@ public class SurgeryService {
                     + "Scan the GS1 code (with expiry date), provide the REF or resolve the pending issue.";
             case EXPIRED_LOT -> "Lot expired on the surgery date. Recorded as a pending issue.";
             case NO_HOSPITAL_BALANCE -> "Lot has no balance inside the hospital. Recorded as a pending issue.";
-            // Raised by the entry, never by a withdrawal: there is no lot to read here and no warning to give.
-            // The case exists because the switch has no default, which is what turns "a new reason appeared
-            // and nobody handled it" into a compilation error instead of English on the screen.
+            // The two below are raised somewhere else -- the entry and the arrival of a shipment -- and never
+            // by a withdrawal: there is no lot to read here and no warning to give. The cases exist because
+            // the switch has no default, which is what turns "a new reason appeared and nobody handled it"
+            // into a compilation error instead of English on the screen. It did exactly that when the arrival
+            // of a shipment brought NOT_DELIVERED in.
             case WITHOUT_INVOICE -> throw new IllegalStateException(
                     "WITHOUT_INVOICE is an entry pending issue and cannot come from a surgery withdrawal");
+            case NOT_DELIVERED -> throw new IllegalStateException(
+                    "NOT_DELIVERED is a shipment pending issue and cannot come from a surgery withdrawal");
         };
         return new WithdrawalResultDTO(false, null, PendingIssueDTO.of(p), warning);
     }

@@ -59,12 +59,30 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
            """)
     List<Stock> listByLot(@Param("lotId") Long lotId);
 
-    /** Units of valid (not expired) lots in the given hospitals, inside the hospital and in the storeroom. */
+    /**
+     * Units of valid (not expired) lots in the given hospitals, wherever they are: inside the hospital, in
+     * the storeroom and on their way there. The dashboard counts what belongs to the operation, and material
+     * already dispatched still does - leaving it out would make the number drop at every dispatch, which
+     * reads as loss.
+     */
     @Query("""
            SELECT COALESCE(SUM(e.quantity), 0) FROM Stock e
            WHERE e.hospital.id IN :hospitalIds AND e.quantity > 0 AND e.lot.expiryDate >= :today
            """)
     long sumValidUnits(@Param("hospitalIds") Collection<Long> hospitalIds, @Param("today") java.time.LocalDate today);
+
+    /**
+     * Units of valid lots in one single location of the given hospitals. Used for the number that has to be
+     * named apart from the total: what is on its way, which the total above deliberately includes.
+     */
+    @Query("""
+           SELECT COALESCE(SUM(e.quantity), 0) FROM Stock e
+           WHERE e.hospital.id IN :hospitalIds AND e.location = :location
+             AND e.quantity > 0 AND e.lot.expiryDate >= :today
+           """)
+    long sumValidUnitsAt(@Param("hospitalIds") Collection<Long> hospitalIds,
+                         @Param("location") Location location,
+                         @Param("today") java.time.LocalDate today);
 
     /** Lots with balance whose expiry date is within [from, to]. */
     @Query("""
@@ -84,13 +102,19 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
     /**
      * Stock by lot and hospital, for the given hospitals. term (optional, partial, case-insensitive)
      * matches the lot number (also without its leading zeros), REF, name (component), description or GTIN.
+     *
+     * The three locations come back as three numbers, never summed. Material on its way is listed because
+     * the question an audit asks of this tab is "what exists", and a balance that exists and is shown
+     * nowhere is a balance nobody counts. A lot that exists only on the road therefore appears with zero
+     * inside the hospital and zero in the storeroom - which is the truth about it.
      */
     @Query(value = """
            SELECT new com.project.mss.dto.stock.LotStockDTO(
                   l.id, m.id, m.ref, m.component, m.description, m.size, m.color, l.number, l.expiryDate,
                   h.id, h.name,
                   SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.HOSPITAL THEN e.quantity ELSE 0 END),
-                  SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.STOREROOM THEN e.quantity ELSE 0 END))
+                  SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.STOREROOM THEN e.quantity ELSE 0 END),
+                  SUM(CASE WHEN e.location = com.project.mss.model.enums.Location.IN_TRANSIT THEN e.quantity ELSE 0 END))
            FROM Stock e JOIN e.lot l JOIN l.material m JOIN e.hospital h
            WHERE e.quantity > 0 AND h.id IN :hospitalIds
              AND (:term IS NULL

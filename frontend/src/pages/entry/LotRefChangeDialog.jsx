@@ -4,11 +4,11 @@ import {
 import DescriptionOutlined from '@mui/icons-material/DescriptionOutlined';
 import StatusChip from '../../components/StatusChip';
 import { API_BASE } from '../../config';
-import { formatDate } from '../../utils/format';
+import { formatDate, placeLabel } from '../../utils/format';
 import { tokens } from '../../theme';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
-const where = (b) => `${b.hospital}${b.location === 'STOREROOM' ? ' (sala)' : ''}`;
+const where = (b) => placeLabel(b.hospital, b.location) || b.hospital;
 const SURGERY_STATUS = { OPEN: 'Em aberto', COMPLETED: 'Concluída' };
 
 /**

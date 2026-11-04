@@ -21,9 +21,12 @@ import com.project.mss.exception.EntityNotFoundException;
 import com.project.mss.model.entity.Hospital;
 import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.Material;
+import com.project.mss.model.entity.DeliveryItem;
+import com.project.mss.model.entity.LoanItem;
 import com.project.mss.model.entity.PendingIssue;
 import com.project.mss.model.entity.Stock;
 import com.project.mss.model.enums.ReadSource;
+import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.PendingIssueReason;
 import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.repository.LotRepository;
@@ -165,12 +168,24 @@ public class PendingIssueService {
             throw new BusinessRuleException("Pending issue " + id + " was already handled");
         }
         boolean withoutInvoice = p.getReason() == PendingIssueReason.WITHOUT_INVOICE;
+        boolean notDelivered = p.getReason() == PendingIssueReason.NOT_DELIVERED;
         if (!withoutInvoice && dto.invoiceNumber() != null && !dto.invoiceNumber().isBlank()) {
             throw new BusinessRuleException("This pending issue is not about a missing invoice");
         }
+        if (!notDelivered && dto.outcome() != null) {
+            throw new BusinessRuleException("This pending issue is not about a shipment");
+        }
+        if (notDelivered && dto.status() == PendingIssueStatus.DISCARDED) {
+            // Discarding would close the question and leave the units on the road for good, counting as
+            // stock that nobody has. Say what happened instead: it turned up, it never left, or it is gone.
+            throw new BusinessRuleException(
+                    "Say what happened to the material: it arrived, it never left, or it was lost");
+        }
         switch (dto.status()) {
             case RESOLVED -> {
-                if (withoutInvoice) {
+                if (notDelivered) {
+                    settleShipment(p, dto);
+                } else if (withoutInvoice) {
                     if (dto.lotId() != null) {
                         throw new BusinessRuleException(
                                 "A pending issue about a missing invoice is not resolved with a lot");
@@ -195,6 +210,53 @@ public class PendingIssueService {
         p.setResolvedAt(LocalDateTime.now());
         p.setResolvedBy(accessControlService.currentUser());
         return PendingIssueDTO.of(pendingIssueRepository.save(p));
+    }
+
+    /**
+     * Settles units that were dispatched and were not in the box. Their balance has been sitting on the road
+     * since the arrival was confirmed; each ending takes it somewhere different, and the movement written
+     * says which, so the history of the lot keeps making sense months later.
+     */
+    private void settleShipment(PendingIssue p, PendingIssueStatusUpdateDTO dto) {
+        if (dto.outcome() == null) {
+            throw new BusinessRuleException(
+                    "Say what happened to the material: it arrived, it never left, or it was lost");
+        }
+        if (dto.lotId() != null) {
+            throw new BusinessRuleException("A shipment pending issue already knows its lot");
+        }
+        DeliveryItem deliveryItem = p.getDeliveryItem();
+        LoanItem loanItem = p.getLoanItem();
+        if (deliveryItem == null && loanItem == null) {
+            throw new BusinessRuleException("This pending issue is not linked to a shipment line");
+        }
+        boolean fromDelivery = deliveryItem != null;
+        Lot lot = fromDelivery ? deliveryItem.getLot() : loanItem.getLot();
+        Hospital destination = p.getHospital();
+        int units = p.getQuantity();
+        Long deliveryId = fromDelivery ? deliveryItem.getDelivery().getId() : null;
+        Long loanId = fromDelivery ? null : loanItem.getLoan().getId();
+        String note = "Pending issue #" + p.getId() + ": " + dto.resolution();
+
+        switch (dto.outcome()) {
+            case ARRIVED -> stockService.recordShipmentArrival(lot, units, destination, loanId, deliveryId, note);
+            case RETURNED -> {
+                Hospital origin;
+                Location originLocation;
+                if (fromDelivery) {
+                    var delivery = deliveryItem.getDelivery();
+                    origin = delivery.getSourceHospital() != null ? delivery.getSourceHospital() : delivery.getHospital();
+                    originLocation = Location.STOREROOM;
+                } else {
+                    var loan = loanItem.getLoan();
+                    origin = loan.getSourceHospital();
+                    originLocation = loan.getSourceLocation();
+                }
+                stockService.recordShipmentReturn(lot, units, destination, origin, originLocation,
+                        loanId, deliveryId, note);
+            }
+            case LOST -> stockService.recordShipmentLoss(lot, units, destination, loanId, deliveryId, note);
+        }
     }
 
     /** Records the correct lot in the surgery linked to the pending issue. */

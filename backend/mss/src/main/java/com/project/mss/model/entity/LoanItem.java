@@ -27,6 +27,15 @@ public class LoanItem {
     @Column(nullable = false)
     private Integer quantity;
 
+    /**
+     * How many units were confirmed on arrival. Null while the shipment is on the road; on arrival it is
+     * what was actually in the box, which is quantity in the ordinary case and less when something is
+     * missing. The difference is what the pending issue is about.
+     */
+    @Column(name = "arrived_quantity")
+    private Integer arrivedQuantity;
+
+
     public LoanItem(Loan loan, Lot lot, Integer quantity) {
         this.loan = loan;
         this.lot = lot;

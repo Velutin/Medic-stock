@@ -30,6 +30,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.project.mss.dto.loan.LoanDTO;
+import com.project.mss.dto.replenishment.DeliveryDTO;
 import com.project.mss.dto.stock.LotStockDTO;
 import com.project.mss.dto.report.WeeklySurgeriesDTO;
 import com.project.mss.exception.BusinessRuleException;
@@ -37,6 +39,7 @@ import com.project.mss.model.entity.Surgery;
 import com.project.mss.model.entity.Loan;
 import com.project.mss.model.entity.Delivery;
 import com.project.mss.model.entity.Hospital;
+import com.project.mss.model.entity.Lot;
 import com.project.mss.model.entity.StoreroomReturn;
 import com.project.mss.model.entity.SupplierOrder;
 import com.project.mss.model.enums.Location;
@@ -92,7 +95,7 @@ public class ReportService {
                 .map(i -> {
                     var m = i.getLot().getMaterial();
                     String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
-                    return new String[]{m.getRef(), name, i.getLot().getNumber(), fmt(i.getLot().getExpiryDate()),
+                    return new String[]{m.getRef(), name, Lot.printedNumber(i.getLot().getNumber()), fmt(i.getLot().getExpiryDate()),
                             String.valueOf(i.getQuantity())};
                 })
                 .toList();
@@ -136,7 +139,7 @@ public class ReportService {
             var m = i.getLot().getMaterial();
             String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
             String expiry = fmt(i.getLot().getExpiryDate()) + (flagExpired && i.getLot().isExpired(day) ? " (vencido)" : "");
-            return new String[]{m.getRef(), name, i.getLot().getNumber(), expiry, String.valueOf(i.getQuantity())};
+            return new String[]{m.getRef(), name, Lot.printedNumber(i.getLot().getNumber()), expiry, String.valueOf(i.getQuantity())};
         }).toList();
     }
 
@@ -163,7 +166,7 @@ public class ReportService {
             var m = i.getLot().getMaterial();
             String name = m.getComponent() != null && !m.getComponent().isBlank() ? m.getComponent() : m.getDescription();
             String expiry = fmt(i.getLot().getExpiryDate()) + (i.getLot().isExpired(day) ? " (vencido)" : "");
-            return new String[]{m.getRef(), name, i.getLot().getNumber(), expiry, String.valueOf(i.getQuantity())};
+            return new String[]{m.getRef(), name, Lot.printedNumber(i.getLot().getNumber()), expiry, String.valueOf(i.getQuantity())};
         }).toList();
         int total = e.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
         return pdfService.classicReport(new PdfService.ClassicReport("RETIRADA DE MATERIAIS",
@@ -384,13 +387,136 @@ public class ReportService {
                     cell.setCellStyle(style);
                 }
             }
-            for (int i = 0; i < header.length; i++) sh.autoSizeColumn(i);
-            sh.createFreezePane(0, 3);
+            finish(sh, header.length);
+
+            // One file, not two: the stock of this screen and what is still travelling towards it. The sheets
+            // are added after "Estoque" and never touch its columns or its name, which is what his own
+            // spreadsheet points its formulas at.
+            if (!storeroom && manager) inTransitSheets(wb, headerStyle, term, hospitalId, place);
+
             wb.write(out);
             return out.toByteArray();
         } catch (IOException e) {
             throw new BusinessRuleException("Failed to generate spreadsheet: " + e.getMessage());
         }
+    }
+
+    /**
+     * Two extra sheets of the stock-by-lot file: the balance on the road and the shipments that explain it.
+     *
+     * "A caminho" is the balance, lot by lot, and it is driven by the stock itself, because it is the number
+     * that has to add up: total of "Estoque" plus total of "A caminho" is everything the operation owns.
+     * "Remessas" says where that balance came from and for how long it has been travelling.
+     *
+     * The two totals can differ, and the difference is the point: units dispatched that did not arrive and
+     * are waiting for a decision belong to a shipment already confirmed, so they appear in the balance and
+     * not among the open shipments. Sheets built only from the shipments would leave out exactly what a
+     * count is hunting for. The line under each total says this in Portuguese, on the file, because whoever
+     * opens it in six months will not have this conversation at hand.
+     *
+     * Both sheets honour the same search as "Estoque". A file whose sheets disagree about what was searched
+     * would be worse than no file at all.
+     */
+    private void inTransitSheets(XSSFWorkbook wb, XSSFCellStyle headerStyle, String term, Long hospitalId,
+                                 String place) {
+        XSSFCellStyle cell = wb.createCellStyle();
+        borders(cell);
+        LocalDate today = LocalDate.now();
+        String searched = term == null || term.isBlank() ? "" : " - busca: " + term.trim();
+
+        List<LotStockDTO> balance = stockService.inTransitLots(hospitalId, term);
+        XSSFSheet sh = wb.createSheet("A caminho");
+        long units = balance.stream().mapToLong(LotStockDTO::inTransitQuantity).sum();
+        sheetTitle(sh, headerStyle, "Material a caminho - " + place + " - " + today.format(DATE) + searched
+                + " - " + balance.size() + (balance.size() == 1 ? " linha" : " linhas") + ", " + units
+                + (units == 1 ? " peça" : " peças"));
+        String[] header = {"REF", "Descrição", "Componente", "Tamanho", "Lote", "Validade", "Situação",
+                           "Dias para vencer", "A caminho", "Hospital de destino"};
+        writeHeader(sh, headerStyle, header);
+        int n = 3;
+        for (LotStockDTO l : balance) {
+            long daysLeft = ChronoUnit.DAYS.between(today, l.expiryDate());
+            String status = daysLeft < 0 ? "Vencido" : daysLeft <= 30 ? "Vence em até 30 dias" : "Válido";
+            writeRow(sh, n++, cell, new Object[]{l.ref(), l.description(), l.component(), l.size(),
+                    Lot.printedNumber(l.lot()), l.expiryDate().format(DATE), status, daysLeft,
+                    l.inTransitQuantity(), l.hospital()});
+        }
+        writeRow(sh, n + 1, cell, new Object[]{"Total de peças a caminho", units});
+        writeRow(sh, n + 2, cell, new Object[]{"Estoque total = total da coluna \"Total\" da aba Estoque + este "
+                + "total. Inclui peças de remessas já confirmadas que não chegaram e aguardam decisão na tela "
+                + "de Pendências."});
+        finish(sh, header.length);
+
+        List<DeliveryDTO> transfers = deliveryService.listDispatched().stream()
+                .filter(d -> hospitalId == null || hospitalId.equals(d.hospitalId()))
+                .toList();
+        List<LoanDTO> loans = loanService.listDispatched().stream()
+                .filter(l -> hospitalId == null || hospitalId.equals(l.destinationHospitalId()))
+                .toList();
+        XSSFSheet sh2 = wb.createSheet("Remessas");
+        String[] header2 = {"Remessa", "Tipo", "Origem", "Destino", "Despachada em", "Dias na estrada",
+                            "REF", "Descrição", "Lote", "Validade", "Qtd. despachada"};
+        writeHeader(sh2, headerStyle, header2);
+        int n2 = 3;
+        long sent = 0;
+        for (DeliveryDTO d : transfers) {
+            String origin = (d.sourceHospital() != null ? d.sourceHospital() : d.hospital()) + " (sala)";
+            for (DeliveryDTO.DeliveryLine i : d.items()) {
+                sent += i.quantity();
+                writeRow(sh2, n2++, cell, new Object[]{"nº " + d.id(), "Transferência", origin, d.hospital(),
+                        d.createdAt().toLocalDate().format(DATE),
+                        ChronoUnit.DAYS.between(d.createdAt().toLocalDate(), today), i.ref(), i.description(),
+                        Lot.printedNumber(i.lot()), i.expiryDate().format(DATE), i.quantity()});
+            }
+        }
+        for (LoanDTO l : loans) {
+            String origin = l.sourceHospital() + (l.sourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)");
+            for (LoanDTO.LoanLine i : l.items()) {
+                sent += i.quantity();
+                writeRow(sh2, n2++, cell, new Object[]{"nº " + l.id(), "Empréstimo", origin,
+                        l.destinationHospital(), l.createdAt().toLocalDate().format(DATE),
+                        ChronoUnit.DAYS.between(l.createdAt().toLocalDate(), today), i.ref(), i.description(),
+                        Lot.printedNumber(i.lot()), i.expiryDate().format(DATE), i.quantity()});
+            }
+        }
+        sheetTitle(sh2, headerStyle, "Remessas despachadas e não confirmadas - " + place + " - "
+                + today.format(DATE) + " - " + (transfers.size() + loans.size())
+                + (transfers.size() + loans.size() == 1 ? " remessa, " : " remessas, ") + sent
+                + (sent == 1 ? " peça" : " peças"));
+        writeRow(sh2, n2 + 1, cell, new Object[]{"Total despachado e não confirmado", sent});
+        writeRow(sh2, n2 + 2, cell, new Object[]{"Diferença para a aba \"A caminho\": " + (units - sent)
+                + ". Diferente de zero significa peça de remessa já confirmada que não chegou e aguarda "
+                + "decisão na tela de Pendências."});
+        finish(sh2, header2.length);
+    }
+
+    private void sheetTitle(XSSFSheet sh, XSSFCellStyle style, String text) {
+        Row title = sh.createRow(0);
+        title.createCell(0).setCellValue(text);
+        title.getCell(0).setCellStyle(style);
+    }
+
+    private void writeHeader(XSSFSheet sh, XSSFCellStyle style, String[] header) {
+        Row head = sh.createRow(2);
+        for (int i = 0; i < header.length; i++) {
+            head.createCell(i).setCellValue(header[i]);
+            head.getCell(i).setCellStyle(style);
+        }
+    }
+
+    private void writeRow(XSSFSheet sh, int index, XSSFCellStyle style, Object[] values) {
+        Row row = sh.createRow(index);
+        for (int i = 0; i < values.length; i++) {
+            var c = row.createCell(i);
+            if (values[i] instanceof Number num) c.setCellValue(num.doubleValue());
+            else c.setCellValue(values[i] == null ? "" : values[i].toString());
+            c.setCellStyle(style);
+        }
+    }
+
+    private void finish(XSSFSheet sh, int columns) {
+        for (int i = 0; i < columns; i++) sh.autoSizeColumn(i);
+        sh.createFreezePane(0, 3);
     }
 
     private XSSFCellStyle colorStyle(XSSFWorkbook wb, String hex) {

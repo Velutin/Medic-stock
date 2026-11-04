@@ -85,7 +85,7 @@ export default function ReportsPage() {
   const current = TYPES.find((t) => t.id === type);
   const set = (field, value) => setFilters((f) => ({ ...f, [field]: value }));
   const searchLot = (value) => set('lot', value);
-  // Typing a number by hand means "this number", not the invoice the Em transporte screen pointed at
+  // Typing a number by hand means "this number", not the invoice the Notas e rastreio screen pointed at
   const searchInvoice = (value) => setFilters((f) => ({ ...f, invoice: value, invoiceId: undefined }));
 
   useEffect(() => {

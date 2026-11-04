@@ -21,5 +21,15 @@ public enum MovementType {
      * Its own type so the movements report counts the two directions apart instead of making them one
      * "transfer" number that only the origin and destination columns could separate.
      */
-    STOREROOM_RETURN
+    STOREROOM_RETURN,
+    /**
+     * Second leg of a shipment: it reached the hospital and left the road. The first leg keeps the type it
+     * always had (REPLENISHMENT or LOAN), so the movements report still counts one transfer per transfer
+     * instead of two.
+     */
+    SHIPMENT_ARRIVAL,
+    /** A shipment went back where it came from: called off, or it turned out never to have left. */
+    SHIPMENT_RETURNED,
+    /** A shipment, or part of it, is gone. Leaves the stock and enters nowhere, like a supplier return. */
+    SHIPMENT_LOST
 }

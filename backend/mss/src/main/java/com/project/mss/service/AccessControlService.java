@@ -84,6 +84,19 @@ public class AccessControlService {
         }
     }
 
+    /**
+     * Whether the current user may see what is on its way to the hospital.
+     *
+     * Administrators may, and so may the surgical tech: he plans his own week with it, and knowing that the
+     * box is already on the road is the difference between calling the office and waiting. The read-only
+     * profile may not, by the same rule that keeps the storeroom away from it - material in transit is
+     * internal movement of the company, not what the hospital has.
+     */
+    public boolean canSeeInTransit() {
+        User user = currentUser();
+        return user.isManager() || user.hasAnyRole(com.project.mss.model.enums.UserRole.SURGICAL_TECH.name());
+    }
+
     /** Surgery values (prices, totals) are visible only to administrators. */
     public boolean canSeeValues() {
         return currentUser().isManager();

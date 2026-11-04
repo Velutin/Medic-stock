@@ -4,12 +4,12 @@ import { API_BASE } from '../../config';
 import { downloadFile } from '../../api/download';
 import { useNotify } from '../../notifications/NotificationProvider';
 import StatusChip from '../../components/StatusChip';
-import { formatDate, formatDateTime } from '../../utils/format';
+import { formatDate, formatDateTime, locationTitle, placeLabel } from '../../utils/format';
 import { tokens } from '../../theme';
 import { Empty, Loading, PagedTable, pct, useReport } from './reportUtils';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
-const where = (hospital, location) => (hospital ? `${hospital}${location === 'STOREROOM' ? ' (sala)' : location === 'HOSPITAL' ? ' (hospital)' : ''}` : '—');
+const where = (hospital, location) => placeLabel(hospital, location) || '—';
 
 /** Weekly closing (Saturday to Friday): open and completed surgeries per hospital. */
 export function WeeklyReport({ query }) {
@@ -128,7 +128,7 @@ export function ValidityReport({ query }) {
     <PagedTable items={data} rowKey={(r) => `${r.hospital}-${r.location}-${r.lot}-${r.expiryDate}-${r.ref}`} minWidth={820}
       columns={[{ label: 'Hospital' }, { label: 'Local' }, { label: 'REF' }, { label: 'Material' }, { label: 'Lote' }, { label: 'Validade' }, { label: 'Situação' }, { label: 'Qtd.', align: 'right' }]}
       row={(r) => (<>
-        <TableCell>{r.hospital}</TableCell><TableCell>{r.location === 'STOREROOM' ? 'Sala' : 'Hospital'}</TableCell>
+        <TableCell>{r.hospital}</TableCell><TableCell>{locationTitle(r.location)}</TableCell>
         <TableCell sx={mono}>{r.ref}</TableCell><TableCell>{r.description}</TableCell><TableCell sx={mono}>{r.lot}</TableCell>
         <TableCell sx={mono}>{formatDate(r.expiryDate)}</TableCell>
         <TableCell>{r.daysLeft < 0 ? <StatusChip tone="error">Vencido</StatusChip>
@@ -191,6 +191,8 @@ export const MOVEMENT_TYPES = {
   REPLENISHMENT: 'Transferência', SURGERY_WITHDRAWAL: 'Saída em cirurgia', SURGERY_REVERSAL: 'Estorno de cirurgia',
   LOAN: 'Empréstimo', SUPPLIER_RETURN: 'Devolução à Baumer', LOT_CORRECTION: 'Correção de lote',
   STOREROOM_RETURN: 'Retirada para a sala',
+  SHIPMENT_ARRIVAL: 'Chegada da remessa', SHIPMENT_RETURNED: 'Remessa devolvida à origem',
+  SHIPMENT_LOST: 'Remessa extraviada',
 };
 
 /** Every stock movement in the period. */

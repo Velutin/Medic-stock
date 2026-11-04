@@ -43,6 +43,11 @@ function useDebounced(value, delay = 350) {
  *    the item and the hospital balance.
  *  - location STOREROOM (administrators): what is in the storerooms waiting to be transferred, including
  *    the storeroom of a distribution center. The pencil edits the item and the storeroom balance.
+ *
+ * A third column, "A caminho", shows up in the hospital view when something is travelling towards it. It is
+ * never summed into the other two: a lot that exists only on the road comes with zero inside the hospital
+ * and zero in the storeroom, which is the truth about it. The spreadsheet of this screen deliberately leaves
+ * those rows out, because his own formulas read that file - the audit listing is its own file.
  */
 export default function LotView({ hospitals, hospitalId, onHospitalChange, canAdjust, reloadKey,
                                   location = 'HOSPITAL', term, onTermChange, misplaced = false, onMisplacedChange,
@@ -94,6 +99,12 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
 
   const allHospitals = !hospitalId;
   const rows = data?.content || [];
+  /*
+   * A coluna "A caminho" só aparece quando há algo na estrada nesta página. Uma coluna de zeros todos os dias
+   * seria ruído na tela que ele mais usa; e para o perfil Consulta a API devolve zero, então ela nunca
+   * aparece para ele. O arquivo completo da auditoria sai pela tela de Remessas a caminho.
+   */
+  const transitColumn = !storeroom && rows.some((r) => r.inTransitQuantity > 0);
 
   // A distribution center keeps no balance inside the hospital, so there is nothing to edit in that column;
   // in the storeroom view its storeroom is exactly where its stock is, and the pencil belongs there.
@@ -164,6 +175,11 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
                 <Typography variant="body2" component="div">{storeroom ? 'Na sala' : 'No hospital'}: {quantityCell(r)}</Typography>
                 {storeroomColumn && <Typography variant="body2" color="text.secondary">Na sala: {r.storeroomQuantity}</Typography>}
+                {transitColumn && r.inTransitQuantity > 0 && (
+                  <Typography variant="body2" sx={{ color: tokens.primary, fontWeight: 600 }}>
+                    A caminho: {r.inTransitQuantity}
+                  </Typography>
+                )}
               </Box>
             </Paper>
           ))}
@@ -181,6 +197,7 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
                 {allHospitals && <TableCell>{storeroom ? 'Sala' : 'Hospital'}</TableCell>}
                 <TableCell align="right">{storeroom ? 'Na sala' : 'No hospital'}</TableCell>
                 {storeroomColumn && <TableCell align="right">Na sala</TableCell>}
+                {transitColumn && <TableCell align="right">A caminho</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -194,6 +211,13 @@ export default function LotView({ hospitals, hospitalId, onHospitalChange, canAd
                   {allHospitals && <TableCell>{r.hospital}</TableCell>}
                   <TableCell align="right">{quantityCell(r)}</TableCell>
                   {storeroomColumn && <TableCell align="right">{r.storeroomQuantity}</TableCell>}
+                  {transitColumn && (
+                    <TableCell align="right"
+                      sx={{ color: r.inTransitQuantity > 0 ? tokens.primary : tokens.textMuted,
+                            fontWeight: r.inTransitQuantity > 0 ? 600 : 400 }}>
+                      {r.inTransitQuantity > 0 ? r.inTransitQuantity : '—'}
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

@@ -9,12 +9,11 @@ import PictureAsPdfOutlined from '@mui/icons-material/PictureAsPdfOutlined';
 import { downloadFile } from '../../api/download';
 import { useNotify } from '../../notifications/NotificationProvider';
 import StatusChip from '../../components/StatusChip';
-import { formatDate, formatDateTime } from '../../utils/format';
+import { formatDate, formatDateTime, locationLabel } from '../../utils/format';
 import { tokens } from '../../theme';
 
 const PAGE = 10;
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
-const whereLabel = (location) => (location === 'STOREROOM' ? 'sala' : 'hospital');
 
 /** Latest loans and returns; each one opens its items. */
 export default function LoanHistory({ history }) {
@@ -68,7 +67,7 @@ export default function LoanHistory({ history }) {
                         <TableCell>
                           <StatusChip tone={isReturn ? 'info' : 'neutral'}>{isReturn ? 'Devolução' : 'Empréstimo'}</StatusChip>
                         </TableCell>
-                        <TableCell>{l.sourceHospital} <Typography component="span" variant="caption" color="text.secondary">({whereLabel(l.sourceLocation)})</Typography></TableCell>
+                        <TableCell>{l.sourceHospital} <Typography component="span" variant="caption" color="text.secondary">({locationLabel(l.sourceLocation)})</Typography></TableCell>
                         <TableCell>{isReturn ? 'Baumer' : l.destinationHospital}</TableCell>
                         <TableCell align="right">{units}</TableCell>
                         <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
