@@ -58,6 +58,27 @@ final class ShipmentArrival {
         return byItem;
     }
 
+    /**
+     * The reason a whole shipment is being written off, required.
+     *
+     * Everything in the box leaves the stock at once, and a write-off with no reason written down is a
+     * record nobody can explain months later - which is exactly when it will be asked about.
+     */
+    static String requireReason(ShipmentStatusUpdateDTO dto) {
+        String why = dto == null || dto.notes() == null ? "" : dto.notes().trim();
+        if (why.isEmpty()) {
+            throw new BusinessRuleException("Say what happened to the box before writing it off as lost");
+        }
+        return why.length() > 300 ? why.substring(0, 300) : why;
+    }
+
+    /** Keeps the note the shipment already had and adds the write-off reason after it. */
+    static String withLossReason(String notes, String why) {
+        String base = notes == null || notes.isBlank() ? "" : notes.trim() + " · ";
+        String joined = base + "Extravio: " + why;
+        return joined.length() > 500 ? joined.substring(0, 500) : joined;
+    }
+
     /** More units than were sent did not come out of this box. */
     static void requireWithinSent(int received, int sent, String lotNumber) {
         if (received > sent) {

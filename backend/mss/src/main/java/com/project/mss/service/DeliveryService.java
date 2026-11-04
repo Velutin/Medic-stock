@@ -101,6 +101,7 @@ public class DeliveryService {
         return switch (dto.status()) {
             case ARRIVED -> arrive(id, dto);
             case CANCELLED -> cancel(id);
+            case LOST -> lost(id, dto);
             case DISPATCHED -> throw new BusinessRuleException(
                     "A shipment is dispatched when it is created; it cannot be sent back to the road");
         };
@@ -142,6 +143,34 @@ public class DeliveryService {
      * Only while nothing has been confirmed. Once the box has been opened at the hospital there is nothing
      * to call off: what is there is there, and what is missing is already a pending issue.
      */
+    /**
+     * The box never arrived: everything in it leaves the stock at once.
+     *
+     * One movement per lot, so the history of each lot still says where it ended. No pending issue is
+     * created: a pending issue exists while what happened is unknown, and here it is known. Recording this
+     * as "zero arrived" instead would create one pending issue per line and then ask for each of them to be
+     * settled as a loss - the same event entered twice over, forty times on a box of forty items.
+     */
+    private DeliveryDTO lost(Long id, ShipmentStatusUpdateDTO dto) {
+        accessControlService.requireManager();
+        Delivery delivery = load(id);
+        if (delivery.getStatus() != ShipmentStatus.DISPATCHED) {
+            throw new BusinessRuleException("Only a transfer still on the road can be written off as lost");
+        }
+        String why = ShipmentArrival.requireReason(dto);
+        LocalDate day = ShipmentArrival.arrivalDay(dto, delivery.getCreatedAt());
+        for (DeliveryItem item : delivery.getItems()) {
+            stockService.recordShipmentLoss(item.getLot(), item.getQuantity(), delivery.getHospital(), null,
+                    delivery.getId(), "Transfer #" + delivery.getId() + " lost: " + why);
+            item.setArrivedQuantity(0);
+        }
+        delivery.setStatus(ShipmentStatus.LOST);
+        delivery.setArrivedOn(day);
+        delivery.setArrivedBy(accessControlService.currentUser());
+        delivery.setNotes(ShipmentArrival.withLossReason(delivery.getNotes(), why));
+        return DeliveryDTO.of(deliveryRepository.save(delivery));
+    }
+
     private DeliveryDTO cancel(Long id) {
         accessControlService.requireManager();
         Delivery delivery = load(id);
@@ -189,11 +218,17 @@ public class DeliveryService {
         return center;
     }
 
-    /** Latest deliveries to a hospital. */
+    /**
+     * Latest deliveries to a hospital.
+     *
+     * Cancelled ones are left out, here and in the listing below: the material was registered and put
+     * straight back, so a line for it would claim a movement that was undone in the same breath.
+     */
     @Transactional(readOnly = true)
     public List<DeliveryDTO> listByHospital(Long hospitalId) {
         accessControlService.requireHospitalAccess(hospitalId);
         return deliveryRepository.findTop50ByHospitalIdOrderByCreatedAtDesc(hospitalId).stream()
+                .filter(d -> d.getStatus() != ShipmentStatus.CANCELLED)
                 .map(DeliveryDTO::of).toList();
     }
 
@@ -202,6 +237,7 @@ public class DeliveryService {
     public List<DeliveryDTO> listBySource(Long sourceHospitalId) {
         accessControlService.requireHospitalAccess(sourceHospitalId);
         return deliveryRepository.findTop50BySourceHospitalIdOrderByCreatedAtDesc(sourceHospitalId).stream()
+                .filter(d -> d.getStatus() != ShipmentStatus.CANCELLED)
                 .map(DeliveryDTO::of).toList();
     }
 

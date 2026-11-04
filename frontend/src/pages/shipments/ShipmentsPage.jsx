@@ -4,12 +4,9 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography,
 } from '@mui/material';
 import LocalShippingOutlined from '@mui/icons-material/LocalShippingOutlined';
-import FileDownloadOutlined from '@mui/icons-material/FileDownloadOutlined';
 import PageHeader from '../../components/PageHeader';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import useShipmentsDraft from './useShipmentsDraft';
-import { downloadFile } from '../../api/download';
-import { useNotify } from '../../notifications/NotificationProvider';
 import { formatDate, formatDateTime } from '../../utils/format';
 import { tokens } from '../../theme';
 
@@ -29,12 +26,20 @@ const daysOnRoad = (createdAt) => {
  * estrada: remessa esquecida aqui é material que o hospital não tem e o sistema não cobra de ninguém.
  */
 export default function ShipmentsPage() {
-  const notify = useNotify();
   const shipments = useShipmentsDraft();
   const [arriving, setArriving] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [losing, setLosing] = useState(null);
   const [arrivedOn, setArrivedOn] = useState('');
+  const [lostOn, setLostOn] = useState('');
+  const [reason, setReason] = useState('');
   const [received, setReceived] = useState({});
+
+  const openLoss = (row) => {
+    setLostOn(shipments.todayIso());
+    setReason('');
+    setLosing(row);
+  };
 
   const openArrival = (row) => {
     setArrivedOn(shipments.todayIso());
@@ -58,21 +63,6 @@ export default function ShipmentsPage() {
     if (await shipments.confirmArrival(arriving, arrivedOn, short)) setArriving(null);
   };
 
-  /**
-   * Planilha de auditoria. Sai desta tela porque é aqui que o material a caminho mora, mas não é a lista da
-   * tela: ela é o saldo em trânsito, lote a lote, mais as remessas que o explicam. O saldo pode ser maior
-   * que as remessas abertas — peça de remessa já confirmada que não chegou continua na estrada — e é
-   * exatamente essa diferença que a auditoria procura.
-   */
-  const exportSpreadsheet = async () => {
-    const today = new Date().toLocaleDateString('sv-SE');
-    try {
-      await downloadFile('/stock/in-transit/xlsx', `estoque-a-caminho-${today}.xlsx`);
-    } catch (err) {
-      notify.error(err);
-    }
-  };
-
   const setQuantity = (item, value) => {
     const qty = Math.max(0, Math.min(item.quantity, Math.floor(Number(value) || 0)));
     setReceived((r) => ({ ...r, [item.itemId]: qty }));
@@ -80,13 +70,7 @@ export default function ShipmentsPage() {
 
   return (
     <>
-      <PageHeader title="Remessas a caminho" subtitle="Material despachado que ainda não foi confirmado no destino"
-        actions={(
-          <Button variant="outlined" startIcon={<FileDownloadOutlined />} onClick={exportSpreadsheet}
-            title="Saldo em trânsito lote a lote, com as remessas que o explicam — para levantamento e auditoria">
-            Exportar planilha
-          </Button>
-        )} />
+      <PageHeader title="Remessas a caminho" subtitle="Material despachado que ainda não foi confirmado no destino" />
 
       {shipments.loading ? (
         <Stack spacing={1.5}>{[1, 2, 3].map((i) => <Skeleton key={i} variant="rounded" height={92} />)}</Stack>
@@ -133,6 +117,10 @@ export default function ShipmentsPage() {
                       <Button variant="text" color="error" onClick={() => setCancelling(row)}
                         disabled={shipments.sending}>
                         Cancelar
+                      </Button>
+                      <Button variant="outlined" color="error" onClick={() => openLoss(row)}
+                        disabled={shipments.sending}>
+                        Caixa extraviada
                       </Button>
                       <Button variant="contained" onClick={() => openArrival(row)} disabled={shipments.sending}>
                         Confirmar chegada
@@ -205,6 +193,37 @@ export default function ShipmentsPage() {
           <Button onClick={() => setArriving(null)}>Voltar</Button>
           <Button variant="contained" onClick={confirm} disabled={shipments.sending || !arrivedOn}>
             Confirmar chegada
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* A caixa inteira se perdeu: um lançamento, não um por item. É o desfecho mais provável quando
+          alguma coisa dá errado no transporte, e o caminho de confirmar zero em cada linha e depois
+          resolver cada pendência transformaria um evento em dezenas de lançamentos. */}
+      <Dialog open={Boolean(losing)} onClose={() => setLosing(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ typography: 'h3' }}>Caixa extraviada · {losing?.label}</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2.5}>
+            <Alert severity="warning">
+              Todo o conteúdo da remessa sai do estoque de uma vez
+              {losing ? ` — ${losing.items.reduce((s, i) => s + i.quantity, 0)} ` : ' '}
+              {losing && losing.items.reduce((s, i) => s + i.quantity, 0) === 1 ? 'peça' : 'peças'}, em{' '}
+              {losing?.items.length} {losing?.items.length === 1 ? 'lote' : 'lotes'}. Isso não se desfaz pela
+              tela. Se a caixa chegou incompleta, use “Confirmar chegada” e ajuste as linhas que vieram a menos.
+            </Alert>
+            <TextField type="date" label="Dado como extraviado em" value={lostOn} sx={{ maxWidth: 240 }}
+              InputLabelProps={{ shrink: true }} onChange={(e) => setLostOn(e.target.value)} />
+            <TextField label="O que aconteceu" required value={reason} multiline minRows={2}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Ex.: Correios abriram processo, objeto extraviado em trânsito"
+              helperText="Fica registrado na remessa e na movimentação de cada lote." />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setLosing(null)}>Voltar</Button>
+          <Button variant="contained" color="error" disabled={shipments.sending || !reason.trim() || !lostOn}
+            onClick={async () => { if (await shipments.markLost(losing, reason.trim(), lostOn)) setLosing(null); }}>
+            Registrar extravio
           </Button>
         </DialogActions>
       </Dialog>

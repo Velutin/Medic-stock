@@ -1,4 +1,8 @@
-import { Box, IconButton, Stack, TableCell, TableRow, Typography } from '@mui/material';
+import { useState } from 'react';
+import {
+  Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, TableCell, TableRow,
+  Typography,
+} from '@mui/material';
 import PictureAsPdfOutlined from '@mui/icons-material/PictureAsPdfOutlined';
 import { API_BASE } from '../../config';
 import { downloadFile } from '../../api/download';
@@ -10,6 +14,52 @@ import { Empty, Loading, PagedTable, pct, useReport } from './reportUtils';
 
 const mono = { fontFamily: tokens.mono, fontSize: 13 };
 const where = (hospital, location) => placeLabel(hospital, location) || '—';
+
+const unidades = (n) => `${n} ${n === 1 ? 'unidade' : 'unidades'}`;
+
+/** Para onde foi o que não chegou de um lote. */
+const fateOf = (s) => {
+  const parts = [];
+  if (s.lost > 0) parts.push(`${unidades(s.lost)} extraviadas`);
+  if (s.returned > 0) parts.push(`${unidades(s.returned)} voltaram à origem`);
+  if (s.pending > 0) parts.push(`${unidades(s.pending)} em aberto`);
+  return parts.join(' · ') || '—';
+};
+
+/**
+ * Lista dos lotes que não chegaram inteiros, numa janela à parte.
+ *
+ * Fica fora da linha de propósito. Uma remessa de 53 itens que se perdeu inteira encheria a tabela de
+ * avisos e empurraria o resto do relatório para fora da tela — o aviso tem que caber numa linha, e o
+ * detalhe fica a um clique, paginado.
+ */
+function ShortfallDialog({ row, onClose }) {
+  return (
+    <Dialog open={Boolean(row)} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle sx={{ typography: 'h3' }}>
+        Lotes que não chegaram · {row?.loan ? 'Empréstimo' : 'Transferência'} nº {row?.number}
+      </DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Chegaram {row?.arrived} de {row?.units}. Os lotes que chegaram inteiros não aparecem aqui.
+        </Typography>
+        {row && (
+          <PagedTable items={row.shortfalls} rowKey={(s) => `${s.ref}-${s.lot}`} minWidth={480}
+            columns={[{ label: 'REF' }, { label: 'Lote' }, { label: 'Enviado', align: 'right' },
+                      { label: 'Chegou', align: 'right' }, { label: 'O que faltou' }]}
+            row={(s) => (<>
+              <TableCell sx={mono}>{s.ref}</TableCell>
+              <TableCell sx={mono}>{s.lot}</TableCell>
+              <TableCell align="right">{s.sent}</TableCell>
+              <TableCell align="right" sx={{ color: tokens.error, fontWeight: 600 }}>{s.arrived}</TableCell>
+              <TableCell>{fateOf(s)}</TableCell>
+            </>)} />
+        )}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, py: 2 }}><Button onClick={onClose}>Fechar</Button></DialogActions>
+    </Dialog>
+  );
+}
 
 /** Weekly closing (Saturday to Friday): open and completed surgeries per hospital. */
 export function WeeklyReport({ query }) {
@@ -92,12 +142,16 @@ export function CancellationsReport({ query }) {
 export function DeliveriesReport({ query }) {
   const notify = useNotify();
   const { data } = useReport('/reports/deliveries', query);
+  // Antes de qualquer return condicional: hook chamado depois de um `if` deixa de ser chamado na renderização
+  // seguinte e quebra a ordem que o React usa para identificá-los.
+  const [detail, setDetail] = useState(null);
   if (!data) return <Loading />;
   const download = (d) => downloadFile(d.pdfPath, `entrega-${d.number}.pdf`).catch((err) => notify.error(err));
   if (data.length === 0) {
     return <Empty>{query.lot ? `Nenhuma entrega com o lote ${query.lot} no período. Se necessário, amplie o período.` : 'Nenhum relatório de entrega no período.'}</Empty>;
   }
   return (
+    <>
     <PagedTable items={data} rowKey={(r) => `${r.loan ? 'L' : 'D'}${r.id}`} minWidth={860}
       columns={[{ label: 'Nº' }, { label: 'Data' }, { label: 'Hospital' }, { label: 'Tipo' }, { label: 'Lotes', align: 'right' }, { label: 'Unidades', align: 'right' }, { label: 'Gerado por' }, { label: '' }]}
       row={(r) => (<>
@@ -114,9 +168,29 @@ export function DeliveriesReport({ query }) {
           {r.sourceHospital && <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
             {r.loan ? `de ${r.sourceHospital}` : `da sala de ${r.sourceHospital}`}</Typography>}
         </TableCell>
-        <TableCell align="right">{r.lots}</TableCell><TableCell align="right">{r.units}</TableCell><TableCell>{r.createdBy}</TableCell>
+        <TableCell align="right">{r.lots}</TableCell>
+        <TableCell align="right">
+          {r.units}
+          {/* Uma linha, sempre. O detalhe abre numa janela paginada: remessa perdida inteira pode ter
+              dezenas de lotes, e listá-los aqui tomaria a tela toda. */}
+          {r.status === 'LOST' && (
+            <Typography variant="caption" sx={{ display: 'block', color: tokens.error, fontWeight: 600 }}>
+              Caixa extraviada
+            </Typography>
+          )}
+          {r.status !== 'LOST' && r.shortfalls?.length > 0 && (
+            <Button size="small" color="error" onClick={() => setDetail(r)}
+              sx={{ mt: 0.25, py: 0, px: 0.5, minWidth: 0, fontSize: 12, textTransform: 'none' }}>
+              Chegaram {r.arrived} de {r.units} · {r.shortfalls.length}{' '}
+              {r.shortfalls.length === 1 ? 'lote' : 'lotes'}
+            </Button>
+          )}
+        </TableCell>
+        <TableCell>{r.createdBy}</TableCell>
         <TableCell align="right"><IconButton aria-label={`Baixar PDF da entrega ${r.number}`} onClick={() => download(r)}><PictureAsPdfOutlined fontSize="small" /></IconButton></TableCell>
       </>)} />
+    <ShortfallDialog row={detail} onClose={() => setDetail(null)} />
+    </>
   );
 }
 

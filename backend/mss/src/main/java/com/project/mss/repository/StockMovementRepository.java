@@ -82,4 +82,34 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
                                             @Param("lotIds") Collection<Long> lotIds,
                                             Pageable pageable);
 
+    /**
+     * What became of the units of a set of shipments, summed by shipment and by movement type.
+     *
+     * The physical record is the one that answers this, and not the arrived quantity written on the item:
+     * that one is the count of the box, and it is never revisited. A unit that was missing from the box and
+     * turned up later, went back to the storeroom or was written off as lost leaves its mark here, as a
+     * movement of its own - which is also where an audit would go looking.
+     *
+     * Grouped by lot, and not only by shipment, because "two units went missing" is not an answer when the
+     * box had twenty lots in it: the question is always which lot, and nobody is going to open the shipment
+     * and compare it line by line to find out.
+     *
+     * Returns rows of [shipmentId, lotId, type, units].
+     */
+    @Query("""
+           SELECT m.deliveryId, m.lot.id, m.type, SUM(m.quantity) FROM StockMovement m
+           WHERE m.deliveryId IN :ids AND m.type IN :types
+           GROUP BY m.deliveryId, m.lot.id, m.type
+           """)
+    List<Object[]> shipmentOutcomeByDelivery(@Param("ids") Collection<Long> ids,
+                                             @Param("types") Collection<com.project.mss.model.enums.MovementType> types);
+
+    @Query("""
+           SELECT m.loanId, m.lot.id, m.type, SUM(m.quantity) FROM StockMovement m
+           WHERE m.loanId IN :ids AND m.type IN :types
+           GROUP BY m.loanId, m.lot.id, m.type
+           """)
+    List<Object[]> shipmentOutcomeByLoan(@Param("ids") Collection<Long> ids,
+                                         @Param("types") Collection<com.project.mss.model.enums.MovementType> types);
+
 }

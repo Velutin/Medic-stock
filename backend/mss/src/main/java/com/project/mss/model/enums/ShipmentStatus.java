@@ -13,5 +13,13 @@ public enum ShipmentStatus {
      */
     ARRIVED,
     /** Called off before anyone confirmed anything. The balance went back to where it came from. */
-    CANCELLED
+    CANCELLED,
+    /**
+     * The box never arrived. The balance left the road and left the stock, with a movement per lot.
+     *
+     * It exists as an ending of its own because it is the likely one when the post goes wrong, and because
+     * the alternative was recording it as "zero arrived" line by line and then settling every pending issue
+     * it created - eighty entries for one event on a box of forty items.
+     */
+    LOST
 }

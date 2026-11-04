@@ -39,6 +39,7 @@ import com.project.mss.model.entity.User;
 import com.project.mss.model.enums.LoanType;
 import com.project.mss.model.enums.Location;
 import com.project.mss.model.enums.MovementType;
+import com.project.mss.model.enums.ShipmentStatus;
 import com.project.mss.model.enums.PendingIssueStatus;
 import com.project.mss.model.enums.SurgeryStatus;
 import com.project.mss.repository.DeliveryRepository;
@@ -252,26 +253,52 @@ public class ReportQueryService {
         // Compared without leading zeros: 005706061 finds 5706061 and the other way around
         String search = lot == null || lot.isBlank() ? null : Lot.comparableNumber(lot);
         List<DeliveryReportDTO> out = new ArrayList<>();
-        for (var d : deliveryRepository.listForReport(allowed, p.from(), p.to())) {
-            List<String> matched = matchedLots(search, d.getItems().stream().map(i -> new LotQuantity(i.getLot(), i.getQuantity())).toList());
+        // A cancelled shipment is left out: it was registered and put straight back, so counting it here
+        // would claim material went to the hospital when nothing ever left the storeroom.
+        List<com.project.mss.model.entity.Delivery> transfers = deliveryRepository
+                .listForReport(allowed, p.from(), p.to()).stream()
+                .filter(d -> d.getStatus() != ShipmentStatus.CANCELLED)
+                .toList();
+        Map<Long, Map<Long, int[]>> transferOutcome = outcomes(transfers.stream().map(
+                com.project.mss.model.entity.Delivery::getId).toList(), true);
+        for (var d : transfers) {
+            List<ShipmentLine> lines = d.getItems().stream()
+                    .map(i -> new ShipmentLine(i.getLot(), i.getQuantity(), i.getArrivedQuantity())).toList();
+            List<String> matched = matchedLots(search, lines.stream()
+                    .map(i -> new LotQuantity(i.lot(), i.sent())).toList());
             if (search != null && matched.isEmpty()) continue;
+            int units = d.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
+            Settlement o = settled(d.getStatus(), transferOutcome.get(d.getId()), lines);
             out.add(new DeliveryReportDTO(d.getId(), String.valueOf(d.getId()), false, "/deliveries/" + d.getId() + "/pdf",
                     d.getCreatedAt(), d.getHospital().getName(),
                     d.getSourceHospital() == null ? null : d.getSourceHospital().getName(), d.getItems().size(),
-                    d.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(d.getCreatedBy()), matched));
+                    units, name(d.getCreatedBy()), matched, d.getStatus(),
+                    o == null ? null : o.arrived(), o == null ? 0 : o.returned(), o == null ? 0 : o.lost(),
+                    o == null ? 0 : o.pending(), o == null ? List.of() : o.shortfalls()));
         }
         // Loans are delivered to the hospital as deliveries: they are listed here too, for auditing in one place
-        for (var l : loanRepository.listForReport(LoanType.LOAN, p.from(), p.to())) {
+        List<com.project.mss.model.entity.Loan> sent = loanRepository.listForReport(LoanType.LOAN, p.from(), p.to())
+                .stream().filter(l -> l.getStatus() != ShipmentStatus.CANCELLED).toList();
+        Map<Long, Map<Long, int[]>> loanOutcome = outcomes(sent.stream().map(
+                com.project.mss.model.entity.Loan::getId).toList(), false);
+        for (var l : sent) {
             boolean visible = hospitalId != null
                     ? allowed.contains(l.getDestinationHospital().getId())
                     : allowed.contains(l.getDestinationHospital().getId()) || allowed.contains(l.getSourceHospital().getId());
             if (!visible) continue;
-            List<String> matched = matchedLots(search, l.getItems().stream().map(i -> new LotQuantity(i.getLot(), i.getQuantity())).toList());
+            List<ShipmentLine> lines = l.getItems().stream()
+                    .map(i -> new ShipmentLine(i.getLot(), i.getQuantity(), i.getArrivedQuantity())).toList();
+            List<String> matched = matchedLots(search, lines.stream()
+                    .map(i -> new LotQuantity(i.lot(), i.sent())).toList());
             if (search != null && matched.isEmpty()) continue;
+            int units = l.getItems().stream().mapToInt(i -> i.getQuantity()).sum();
+            Settlement o = settled(l.getStatus(), loanOutcome.get(l.getId()), lines);
             out.add(new DeliveryReportDTO(l.getId(), "E-" + l.getId(), true, "/loans/" + l.getId() + "/pdf",
                     l.getCreatedAt(), l.getDestinationHospital().getName(),
                     l.getSourceHospital().getName() + (l.getSourceLocation() == Location.STOREROOM ? " (sala)" : " (hospital)"),
-                    l.getItems().size(), l.getItems().stream().mapToInt(i -> i.getQuantity()).sum(), name(l.getCreatedBy()), matched));
+                    l.getItems().size(), units, name(l.getCreatedBy()), matched, l.getStatus(),
+                    o == null ? null : o.arrived(), o == null ? 0 : o.returned(), o == null ? 0 : o.lost(),
+                    o == null ? 0 : o.pending(), o == null ? List.of() : o.shortfalls()));
         }
         out.sort(Comparator.comparing(DeliveryReportDTO::createdAt).reversed());
         return out;
@@ -390,6 +417,8 @@ public class ReportQueryService {
         Set<Long> allowed = byLot ? allHospitals() : hospitals(hospitalId);
         String wanted = byLot ? comparableLot(searchableLot(lot)) : null;
         return loanRepository.listForReport(type, p.from(), p.to()).stream()
+                // Cancelled: registered and put straight back, so it never happened as far as the report goes
+                .filter(e -> e.getStatus() != ShipmentStatus.CANCELLED)
                 .filter(e -> allowed.contains(e.getSourceHospital().getId())
                         || (e.getDestinationHospital() != null && allowed.contains(e.getDestinationHospital().getId())))
                 .map(LoanDTO::of)
@@ -642,6 +671,99 @@ public class ReportQueryService {
      * locationLabel acima: o ternário anterior devolvia só o nome do hospital para o material a caminho, e a
      * linha do despacho saía no PDF como se o material já estivesse lá. A tela já dizia certo.
      */
+    /**
+     * Units of each shipment by outcome, read from the movements: [arrived, returned, lost].
+     *
+     * Empty when there is nothing to ask about - a query with an empty IN list is not a question JPQL can
+     * answer, and asking it would cost a round trip to learn nothing.
+     */
+    private Map<Long, Map<Long, int[]>> outcomes(List<Long> ids, boolean delivery) {
+        if (ids.isEmpty()) return Map.of();
+        List<MovementType> types = List.of(MovementType.SHIPMENT_ARRIVAL, MovementType.SHIPMENT_RETURNED,
+                MovementType.SHIPMENT_LOST);
+        List<Object[]> rows = delivery
+                ? stockMovementRepository.shipmentOutcomeByDelivery(ids, types)
+                : stockMovementRepository.shipmentOutcomeByLoan(ids, types);
+        Map<Long, Map<Long, int[]>> out = new java.util.HashMap<>();
+        for (Object[] r : rows) {
+            int[] v = out.computeIfAbsent((Long) r[0], k -> new java.util.HashMap<>())
+                    .computeIfAbsent((Long) r[1], k -> new int[3]);
+            int units = ((Number) r[3]).intValue();
+            switch ((MovementType) r[2]) {
+                case SHIPMENT_ARRIVAL -> v[0] += units;
+                case SHIPMENT_RETURNED -> v[1] += units;
+                case SHIPMENT_LOST -> v[2] += units;
+                default -> { /* the query asks for no other type */ }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * What became of a shipment, lot by lot, or null while it is still on the road.
+     *
+     * Null is not "zero arrived": it is "nothing has happened to it yet", and the screen says nothing at all
+     * in that case. A shipment in the post is not news; one that arrived short is.
+     *
+     * Only the lots that did not arrive whole come back in the list. On a normal shipment it is empty, and
+     * the report looks exactly as it always did.
+     */
+    private static Settlement settled(ShipmentStatus status, Map<Long, int[]> byLot, List<ShipmentLine> items) {
+        if (status == ShipmentStatus.LOST) {
+            // Nothing arrived and there is nothing to compare: the screen says it in one line, and listing
+            // every lot of the box to repeat the same sentence would bury the rest of the report.
+            int units = items.stream().mapToInt(ShipmentLine::sent).sum();
+            return new Settlement(0, 0, units, 0, List.of());
+        }
+        if (status != ShipmentStatus.ARRIVED) return null;
+        Map<Long, int[]> lots = byLot == null ? Map.of() : byLot;
+        int arrived = 0, returned = 0, lost = 0, pending = 0;
+        List<DeliveryReportDTO.Shortfall> gaps = new ArrayList<>();
+        // Items of the same lot are added up first: the shipment may carry it on more than one line
+        Map<Long, int[]> byLotTotals = new java.util.LinkedHashMap<>();
+        Map<Long, Lot> lotById = new java.util.LinkedHashMap<>();
+        for (ShipmentLine i : items) {
+            lotById.putIfAbsent(i.lot().getId(), i.lot());
+            int[] t = byLotTotals.computeIfAbsent(i.lot().getId(), k -> new int[2]);
+            t[0] += i.sent();
+            // Null on a shipment already marked as arrived means it predates this flow: it all arrived
+            t[1] += i.arrived() == null ? i.sent() : i.arrived();
+        }
+        for (var e : byLotTotals.entrySet()) {
+            int sent = e.getValue()[0];
+            int inBox = e.getValue()[1];
+            int[] v = lots.getOrDefault(e.getKey(), new int[3]);
+            /*
+             * What arrived in the end: what was in the box, plus whatever turned up afterwards.
+             *
+             * The arrival movements carry both - the one written when the box was confirmed and the one
+             * written when a missing unit was found later - so the later part is what they hold beyond the
+             * box count. Taking the larger of the two says the same thing and survives the shipments that
+             * predate this flow, which have no arrival movement at all and would otherwise read as if
+             * nothing had ever reached the hospital.
+             */
+            int inTotal = Math.max(inBox, v[0]);
+            int open = Math.max(0, sent - inTotal - v[1] - v[2]);
+            arrived += inTotal;
+            returned += v[1];
+            lost += v[2];
+            pending += open;
+            if (inTotal != sent) {
+                Lot l = lotById.get(e.getKey());
+                gaps.add(new DeliveryReportDTO.Shortfall(l.getMaterial().getRef(),
+                        Lot.printedNumber(l.getNumber()), sent, inTotal, v[1], v[2], open));
+            }
+        }
+        return new Settlement(arrived, returned, lost, pending, gaps);
+    }
+
+    /** One line of a shipment for the report: the lot, what was dispatched and what was in the box. */
+    private record ShipmentLine(Lot lot, int sent, Integer arrived) { }
+
+    /** What became of a shipment: the totals and the lots that did not arrive whole. */
+    private record Settlement(int arrived, int returned, int lost, int pending,
+                              List<DeliveryReportDTO.Shortfall> shortfalls) { }
+
     private static String place(String hospital, Location location) {
         if (hospital == null) return "";
         if (location == null) return hospital;

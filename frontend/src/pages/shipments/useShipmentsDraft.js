@@ -90,6 +90,30 @@ export default function useShipmentsDraft() {
     }
   };
 
+  /**
+   * A caixa inteira se perdeu. Uma chamada, e o saldo sai do estoque com uma movimentação por lote.
+   *
+   * O caminho alternativo seria confirmar a chegada com zero em cada linha e depois resolver cada pendência
+   * como extravio: numa remessa de quarenta itens, oitenta lançamentos para registrar um único evento.
+   */
+  const markLost = async (shipment, reason, lostOn) => {
+    setSending(true);
+    try {
+      await api(shipment.path, {
+        method: 'PATCH',
+        body: { status: 'LOST', notes: reason, arrivedOn: lostOn || todayIso() },
+      });
+      notify.success(`${shipment.label} registrada como extraviada. O material saiu do estoque.`);
+      await load();
+      return true;
+    } catch (err) {
+      notify.error(err);
+      return false;
+    } finally {
+      setSending(false);
+    }
+  };
+
   const cancel = async (shipment) => {
     setSending(true);
     try {
@@ -105,5 +129,5 @@ export default function useShipmentsDraft() {
     }
   };
 
-  return { rows, loading, sending, totals, confirmArrival, cancel, reload: load, todayIso };
+  return { rows, loading, sending, totals, confirmArrival, markLost, cancel, reload: load, todayIso };
 }

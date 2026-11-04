@@ -18,10 +18,14 @@ import jakarta.validation.constraints.PositiveOrZero;
  * ordinary case - so only what came short has to be listed.
  *
  * CANCELLED: it never left. Allowed only while nothing has been confirmed.
+ *
+ * LOST: the box never arrived. Everything in it leaves the stock at once, so notes is required - a write-off
+ * of a whole shipment with no reason written down is the kind of record that cannot be explained later.
  */
 public record ShipmentStatusUpdateDTO(
         @NotNull ShipmentStatus status,
         LocalDate arrivedOn,
+        String notes,
         @Valid List<ArrivedItem> items
 ) {
     public record ArrivedItem(@NotNull Long itemId, @NotNull @PositiveOrZero Integer quantity) { }

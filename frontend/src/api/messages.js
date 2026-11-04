@@ -266,6 +266,14 @@ const FIELDS = {
   'A return to the supplier does not travel through the system':
     'Devolução à Baumer não passa por confirmação de chegada.',
   'A return to the supplier cannot be called off here': 'Devolução à Baumer não é cancelada por aqui.',
+  'Say what happened to the box before writing it off as lost':
+    'Escreva o que aconteceu com a caixa antes de registrar o extravio.',
+  'Only a transfer still on the road can be written off as lost':
+    'Só dá para registrar extravio de uma transferência que ainda está a caminho.',
+  'Only a loan still on the road can be written off as lost':
+    'Só dá para registrar extravio de um empréstimo que ainda está a caminho.',
+  'A return to the supplier cannot be written off here':
+    'Devolução à Baumer não tem registro de extravio por aqui.',
   'A shipment is dispatched when it is created; it cannot be sent back to the road':
     'A remessa já nasce despachada; não dá para mandá-la de volta à estrada.',
   'Choose a window between 0 and 365 days': 'Escolha uma janela entre 0 e 365 dias.',

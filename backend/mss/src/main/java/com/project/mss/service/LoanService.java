@@ -139,6 +139,7 @@ public class LoanService {
         return switch (dto.status()) {
             case ARRIVED -> arrive(id, dto);
             case CANCELLED -> cancel(id);
+            case LOST -> lost(id, dto);
             case DISPATCHED -> throw new BusinessRuleException(
                     "A shipment is dispatched when it is created; it cannot be sent back to the road");
         };
@@ -180,6 +181,33 @@ public class LoanService {
      * Calls off a loan that never left. The material goes back to the exact place it came from - the source
      * hospital's own stock or its storeroom - because anything else would invent a movement.
      */
+    /**
+     * The box never arrived: everything in it leaves the stock at once, one movement per lot. Same reasoning
+     * as the transfer - see DeliveryService.lost - and no pending issue, because what happened is known.
+     */
+    private LoanDTO lost(Long id, ShipmentStatusUpdateDTO dto) {
+        accessControlService.requireManager();
+        Loan loan = load(id);
+        if (loan.getType() != LoanType.LOAN) {
+            throw new BusinessRuleException("A return to the supplier cannot be written off here");
+        }
+        if (loan.getStatus() != ShipmentStatus.DISPATCHED) {
+            throw new BusinessRuleException("Only a loan still on the road can be written off as lost");
+        }
+        String why = ShipmentArrival.requireReason(dto);
+        LocalDate day = ShipmentArrival.arrivalDay(dto, loan.getCreatedAt());
+        for (LoanItem item : loan.getItems()) {
+            stockService.recordShipmentLoss(item.getLot(), item.getQuantity(), loan.getDestinationHospital(),
+                    loan.getId(), null, "Loan #" + loan.getId() + " lost: " + why);
+            item.setArrivedQuantity(0);
+        }
+        loan.setStatus(ShipmentStatus.LOST);
+        loan.setArrivedOn(day);
+        loan.setArrivedBy(accessControlService.currentUser());
+        loan.setNotes(ShipmentArrival.withLossReason(loan.getNotes(), why));
+        return LoanDTO.of(loanRepository.save(loan));
+    }
+
     private LoanDTO cancel(Long id) {
         accessControlService.requireManager();
         Loan loan = load(id);
@@ -215,6 +243,9 @@ public class LoanService {
     public List<LoanDTO> list(LoanType type) {
         var allowed = accessControlService.allowedHospitals();
         return loanRepository.findTop50ByOrderByCreatedAtDesc().stream()
+                // Cancelled: registered and put straight back. Listing it next to the ones that happened
+                // would make the history claim a movement that was undone in the same breath.
+                .filter(e -> e.getStatus() != ShipmentStatus.CANCELLED)
                 .filter(e -> type == null || e.getType() == type)
                 .filter(e -> allowed.contains(e.getSourceHospital().getId())
                         || (e.getDestinationHospital() != null && allowed.contains(e.getDestinationHospital().getId())))
